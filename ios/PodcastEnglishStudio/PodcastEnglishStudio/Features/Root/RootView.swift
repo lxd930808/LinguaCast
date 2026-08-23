@@ -1,0 +1,316 @@
+import SwiftUI
+import SwiftData
+import PodcastEnglishStudioCore
+import CloudSyncKit
+import DomainModels
+
+enum AppTab: Hashable {
+    case home
+    case programs
+    case subscriptions
+    case settings
+}
+
+struct RootView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(SettingsStore.self) private var settings
+    @Environment(CloudSyncCoordinator.self) private var cloudSync
+    @Environment(PlaybackCatalogRecoveryCoordinator.self) private var catalogRecovery
+    @Environment(PipelineRunner.self) private var runner
+    @State private var selectedTab: AppTab
+    @State private var youtubeService = YTLocalService()
+    @State private var isBootstrappingCatalogs = false
+
+    init() {
+        _selectedTab = State(initialValue: UITestSupport.isEnabled ? UITestSupport.initialTab : .home)
+    }
+
+    var body: some View {
+        Group {
+            if UITestSupport.isEnabled, UITestSupport.scenario.usesDirectScene {
+                UITestScenarioView(scenario: UITestSupport.scenario)
+            } else {
+                tabContent
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            LinguaThemeAppearanceProbe()
+        }
+        .preferredColorScheme(UITestSupport.colorSchemeOverride)
+        .tint(LinguaTheme.accent)
+        .task {
+            if UITestSupport.isEnabled {
+                UITestSupport.installFixtures(in: modelContext)
+                runner.reconcileCompletions(context: modelContext)
+                runner.resumeOrphanedPipelines(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
+                runner.resumePendingDisplayRefinements(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
+            } else {
+                runner.reconcileCompletions(context: modelContext)
+                runner.resumeOrphanedPipelines(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
+                runner.resumePendingDisplayRefinements(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
+                cloudSync.start(context: modelContext, settings: settings)
+                // App finished launching: synchronize and recover the continue-playing catalog.
+                await catalogRecovery.synchronizeAndRecover(trigger: .automatic)
+                await bootstrapMissingCatalogs()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, !UITestSupport.isEnabled else { return }
+            runner.reconcileCompletions(context: modelContext)
+            runner.resumeOrphanedPipelines(
+                context: modelContext,
+                configuration: settings.configuration
+            )
+            runner.resumePendingDisplayRefinements(
+                context: modelContext,
+                configuration: settings.configuration
+            )
+            // Returning to the foreground reuses the in-flight recovery task (deduplicated).
+            Task {
+                await catalogRecovery.synchronizeAndRecover(trigger: .automatic)
+                await bootstrapMissingCatalogs()
+            }
+        }
+    }
+
+    @MainActor
+    private func bootstrapMissingCatalogs() async {
+        guard !isBootstrappingCatalogs else { return }
+        isBootstrappingCatalogs = true
+        defer { isBootstrappingCatalogs = false }
+
+        let subscriptions = (try? modelContext.fetch(FetchDescriptor<PodcastSubscription>())) ?? []
+        for subscription in subscriptions where subscription.isEnabled && subscription.lastCheckedAt == nil {
+            await runner.refresh(
+                subscription: subscription,
+                context: modelContext,
+                mode: .recent(limit: 50)
+            )
+        }
+
+        guard !settings.configuration.youtubeAPIKey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+        else { return }
+        let channels = (try? modelContext.fetch(FetchDescriptor<YTChannelRecord>())) ?? []
+        for channel in channels where channel.isEnabled && channel.lastCheckedAt == nil {
+            await youtubeService.refreshChannel(
+                channel,
+                configuration: settings.configuration,
+                context: modelContext
+            )
+        }
+    }
+
+    private var tabContent: some View {
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                HomeView(selectedTab: $selectedTab)
+            }
+            .tabItem {
+                Label(L10n.string("navigation.home", fallback: "Home"), systemImage: "house")
+                    .accessibilityIdentifier("tab.home")
+            }
+            .tag(AppTab.home)
+
+            NavigationStack {
+                ProgramsView(selectedTab: $selectedTab)
+            }
+            .tabItem {
+                Label(L10n.string("navigation.programs", fallback: "Programs"), systemImage: "headphones")
+                    .accessibilityIdentifier("tab.programs")
+            }
+            .tag(AppTab.programs)
+
+            NavigationStack {
+                SubscriptionsView(selectedTab: $selectedTab)
+            }
+            .tabItem {
+                Label(L10n.string("navigation.subscriptions", fallback: "Subscriptions"), systemImage: "dot.radiowaves.left.and.right")
+                    .accessibilityIdentifier("tab.subscriptions")
+            }
+            .tag(AppTab.subscriptions)
+
+            NavigationStack {
+                SettingsView()
+            }
+            .tabItem {
+                Label(L10n.string("navigation.settings", fallback: "Settings"), systemImage: "gearshape")
+                    .accessibilityIdentifier("tab.settings")
+            }
+            .tag(AppTab.settings)
+        }
+        #if os(iOS)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarBackground(LinguaTheme.backgroundRaised.opacity(0.96), for: .tabBar)
+        #endif
+    }
+}
+
+#Preview {
+    RootView()
+        .environment(SettingsStore())
+        .environment(PipelineRunner())
+        .environment(CloudSyncCoordinator.shared)
+        .environment(PlaybackCatalogRecoveryCoordinator(cloudSync: .shared) { nil })
+}
+
+struct ConfigurationReadiness {
+    let summary: ConfigurationReadinessSummary
+
+    init(configuration: AppConfiguration) {
+        summary = ConfigurationReadinessPolicy.summary(
+            youtubeAPIKey: configuration.youtubeAPIKey,
+            dashscopeAPIKey: configuration.dashscopeAPIKey,
+            translationAPIKey: configuration.translationAPIKey
+        )
+    }
+
+    var title: String {
+        summary.isComplete
+            ? L10n.string("root.configuration_completed", fallback: "Configuration completed")
+            : L10n.plural("settings.missing_configuration_count", fallback: "%lld configuration items remaining", count: summary.missingRequirements.count)
+    }
+
+    var subtitle: String {
+        if summary.isComplete {
+            return L10n.string("root.subscriptions_can_be_added_content_refreshed_and_bilingual_subti", fallback: "Subscriptions can be added, content refreshed, and bilingual subtitles generated.")
+        }
+        if !summary.hasPodcastGenerationKeys && !summary.hasYouTubeMetadataKey {
+            return L10n.string("root.fill_in_the_youtube_dashscope_and_translation_api_key_first_to_a", fallback: "Fill in the YouTube, DashScope and translation API Key first to avoid failure after adding or refreshing.")
+        }
+        if !summary.hasPodcastGenerationKeys {
+            return L10n.string("root.podcast_bilingual_subtitle_generation_requires_dashscope_and_tra", fallback: "Podcast Bilingual subtitle generation requires DashScope and translation API Key.")
+        }
+        return L10n.string("root.youtube_channel_list_requires_youtube_data_api_key", fallback: "YouTube Channel list requires YouTube Data API Key.")
+    }
+
+    var progress: Double {
+        guard summary.totalCount > 0 else { return 1 }
+        return Double(summary.completedCount) / Double(summary.totalCount)
+    }
+}
+
+struct SetupChecklistView: View {
+    let readiness: ConfigurationReadiness
+    var showsSettingsButton = true
+    var onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: readiness.summary.isComplete ? "checkmark.seal.fill" : "key.fill")
+                    .font(.title3)
+                    .foregroundStyle(readiness.summary.isComplete ? LinguaTheme.success : LinguaTheme.accent)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(readiness.title)
+                        .font(.headline)
+                    Text(readiness.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            ProgressView(value: readiness.progress)
+                .progressViewStyle(.linear)
+
+            VStack(alignment: .leading, spacing: 8) {
+                configurationRow(title: L10n.string("settings.youtube_data_api_key", fallback: "YouTube Data API Key"), requirement: .youtubeAPIKey)
+                configurationRow(title: L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), requirement: .dashscopeAPIKey)
+                configurationRow(title: L10n.string("root.translation_api_key", fallback: "Translation API Key"), requirement: .translationAPIKey)
+            }
+            .font(.caption)
+
+            if showsSettingsButton && !readiness.summary.isComplete {
+                Button {
+                    onOpenSettings()
+                } label: {
+                    Label(L10n.string("root.go_to_settings_api_key", fallback: "Go to Settings API Key"), systemImage: "gearshape")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .accessibilityIdentifier("setup.configuration")
+        .padding(.vertical, 4)
+    }
+
+    private func configurationRow(title: String, requirement: ConfigurationRequirement) -> some View {
+        let isMissing = readiness.summary.missingRequirements.contains(requirement)
+        return Label(title, systemImage: isMissing ? "circle" : "checkmark.circle.fill")
+            .foregroundStyle(isMissing ? Color.secondary : LinguaTheme.success)
+    }
+}
+
+struct ActionableEmptyStateView: View {
+    var title: String
+    var systemImage: String
+    var message: String
+    var primaryTitle: String
+    var primarySystemImage: String
+    var primaryAction: () -> Void
+    var secondaryTitle: String?
+    var secondarySystemImage: String?
+    var secondaryAction: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    actionButtons
+                }
+                VStack(spacing: 10) {
+                    actionButtons
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button {
+            primaryAction()
+        } label: {
+            Label(primaryTitle, systemImage: primarySystemImage)
+        }
+        .buttonStyle(.borderedProminent)
+
+        if let secondaryTitle,
+           let secondarySystemImage,
+           let secondaryAction {
+            Button {
+                secondaryAction()
+            } label: {
+                Label(secondaryTitle, systemImage: secondarySystemImage)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}

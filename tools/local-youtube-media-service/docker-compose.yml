@@ -1,0 +1,44 @@
+# Cloud / self-host stack: yt-dlp media API + bgutil PO Token sidecar.
+# Review YouTube's Terms of Service and applicable law before enabling this optional service.
+services:
+  bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.2@sha256:9a96e6385ce1928da87dea07b1cab0413d2cf8c07a3b8a8bd419f53df2c3843c
+    restart: unless-stopped
+    ports:
+      - "4416:4416"
+
+  media-api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - bgutil
+    ports:
+      - "3210:3210"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3210"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:3210}
+      AUTH_TOKEN: ${AUTH_TOKEN:?set AUTH_TOKEN}
+      DOWNLOAD_ENGINE: ytdlp
+      YT_DLP_BIN: /usr/local/bin/yt-dlp
+      YT_DLP_JS_RUNTIME: node
+      POT_BASE_URL: http://bgutil:4416
+      PREFERRED_HEIGHT: ${PREFERRED_HEIGHT:-720}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-1}
+      JOB_TTL_MS: ${JOB_TTL_MS:-2700000}
+      MIN_FREE_BYTES: ${MIN_FREE_BYTES:-5368709120}
+      REQUIRE_MEDIA_AUTH: ${REQUIRE_MEDIA_AUTH:-true}
+      MEDIA_ROOT: /data/media
+      # Optional Cloudflare R2 (playback egress $0). Leave unset to serve /media from this host.
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      R2_KEY_PREFIX: ${R2_KEY_PREFIX:-yt-media}
+      R2_SIGNED_URL_TTL_SECONDS: ${R2_SIGNED_URL_TTL_SECONDS:-3600}
+    volumes:
+      - media-data:/data/media
+
+volumes:
+  media-data:

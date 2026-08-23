@@ -1,0 +1,35 @@
+{
+  "name": "local-youtube-media-service",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Optional self-hosted yt-dlp media service for LinguaCast",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check-env": "tsx scripts/check-env.ts",
+    "spike:sabr": "tsx scripts/spike-sabr.ts",
+    "spike:hls": "tsx scripts/spike-hls-streaming.ts",
+    "spike:hls-early": "tsx scripts/spike-hls-early.ts",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "bgutils-js": "^3.2.0",
+    "googlevideo": "4.1.1",
+    "jsdom": "^26.1.0",
+    "ulid": "^3.0.1",
+    "youtubei.js": "17.2.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.15.29",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "license": "MIT"
+}

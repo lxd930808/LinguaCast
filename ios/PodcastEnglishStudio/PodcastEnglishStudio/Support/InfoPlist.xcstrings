@@ -1,0 +1,33 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Application display name",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "es" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "fr" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "ko" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast 双语听译" } }, "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast 雙語聽譯" } }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "Application bundle name",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "de" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "en" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "es" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "fr" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "ja" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "ko" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast 双语听译" } }, "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "LinguaCast 雙語聽譯" } }
+      }
+    },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Local network permission explanation",
+      "localizations" : {
+        "ar" : { "stringUnit" : { "state" : "translated", "value" : "يتيح لجهاز iPhone على الشبكة المحلية إعداد Apple TV وإضافة الاشتراكات." } },
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Ermöglicht einem iPhone im lokalen Netzwerk, Apple TV einzurichten und Abonnements hinzuzufügen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allows an iPhone on the local network to configure Apple TV and add subscriptions." } },
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Permite que un iPhone de la red local configure el Apple TV y añada suscripciones." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Permet à un iPhone du réseau local de configurer l’Apple TV et d’ajouter des abonnements." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "同じローカルネットワーク上のiPhoneからApple TVを設定し、購読を追加するために使用します。" } },
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "로컬 네트워크의 iPhone에서 Apple TV를 설정하고 구독을 추가하는 데 사용합니다." } },
+        "pt-BR" : { "stringUnit" : { "state" : "translated", "value" : "Permite que um iPhone na rede local configure a Apple TV e adicione assinaturas." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用于让同一局域网内的 iPhone 扫码填写 Apple TV 设置和订阅。" } },
+        "zh-Hant" : { "stringUnit" : { "state" : "translated", "value" : "用於讓同一區域網路內的 iPhone 掃碼填寫 Apple TV 設定與訂閱。" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

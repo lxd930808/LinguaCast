@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apple-platforms:
+    name: Swift and Apple platforms
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Test app core package
+        working-directory: ios/PodcastEnglishStudio
+        run: swift test
+
+      - name: Test CloudSyncKit
+        working-directory: Packages/CloudSyncKit
+        run: swift test
+
+      - name: Test DomainModels
+        working-directory: Packages/DomainModels
+        run: swift test
+
+      - name: Test PlayerKit
+        working-directory: Packages/PlayerKit
+        run: swift test
+
+      - name: Generate Xcode project
+        working-directory: ios/PodcastEnglishStudio
+        run: xcodegen generate
+
+      - name: Build iOS without signing
+        working-directory: ios/PodcastEnglishStudio
+        run: |
+          xcodebuild -project PodcastEnglishStudio.xcodeproj \
+            -scheme PodcastEnglishStudio \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Build tvOS without signing
+        working-directory: ios/PodcastEnglishStudio
+        run: |
+          xcodebuild -project PodcastEnglishStudio.xcodeproj \
+            -scheme PodcastEnglishStudio \
+            -configuration Debug \
+            -destination 'generic/platform=tvOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
+
+  media-service:
+    name: Node.js media service
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools/local-youtube-media-service
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tools/local-youtube-media-service/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+
+  media-container:
+    name: Media container smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build image
+        run: docker build -t linguacast-media:ci tools/local-youtube-media-service
+      - name: Start container
+        run: |
+          docker run --detach --name linguacast-media -p 3210:3210 \
+            -e AUTH_TOKEN=ci-only-token \
+            -e PUBLIC_BASE_URL=http://127.0.0.1:3210 \
+            -e MIN_FREE_BYTES=0 \
+            linguacast-media:ci
+      - name: Verify public health API
+        run: |
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:3210/health && exit 0
+            sleep 2
+          done
+          docker logs linguacast-media
+          exit 1
+      - name: Stop container
+        if: always()
+        run: docker rm --force linguacast-media || true
