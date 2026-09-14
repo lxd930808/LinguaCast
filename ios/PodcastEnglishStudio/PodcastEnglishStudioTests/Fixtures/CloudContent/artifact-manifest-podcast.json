@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "pipelineVersion": "v10.1",
+  "jobId": "cj_01JFX7K2T4N8PZQM3VWYR6ABCD",
+  "contentType": "podcast_episode",
+  "contentKey": "podcast:9f2c1ab7d4e68013:5b7d9e0f2a4c6183",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "generatedAt": "2026-08-28T02:09:28Z",
+  "audioFingerprint": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "sourceFingerprint": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
+  "audio": {
+    "mimeType": "audio/mpeg",
+    "bytes": 28901376,
+    "durationSeconds": 1804.5,
+    "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "transcoded": false
+  },
+  "files": [
+    {
+      "name": "segments.json",
+      "role": "segments",
+      "required": true,
+      "status": "ready",
+      "mimeType": "application/json",
+      "bytes": 148212,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "etag": "\"seg-01JFX7K2T4\""
+    },
+    {
+      "name": "source.vtt",
+      "role": "sourceVtt",
+      "required": true,
+      "status": "ready",
+      "mimeType": "text/vtt",
+      "bytes": 40211,
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "etag": "\"vtt-src-01JFX7K2T4\""
+    },
+    {
+      "name": "target.vtt",
+      "role": "targetVtt",
+      "required": true,
+      "status": "ready",
+      "mimeType": "text/vtt",
+      "bytes": 38902,
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "etag": "\"vtt-tgt-01JFX7K2T4\""
+    },
+    {
+      "name": "raw-transcript.json",
+      "role": "rawTranscript",
+      "required": false,
+      "status": "ready",
+      "mimeType": "application/json",
+      "bytes": 301882,
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "etag": "\"raw-01JFX7K2T4\""
+    }
+  ]
+}

@@ -42,12 +42,15 @@ extension EpisodeDetailView {
                 .frame(maxWidth: 1_100)
                 TVEpisodeActionShelf(
                     episode: episode,
-                    progressValue: progressValue,
                     progressStepTitle: progressStepTitle,
                     processingAction: processingAction,
                     hasGenerationKeys: settings.configuration.hasRequiredGenerationKeys,
                     hasASRKey: settings.configuration.hasDashScopeASRKey,
                     hasTranslationKey: settings.configuration.hasTranslationKey,
+                    cloudState: cloudGenerationState,
+                    cloudSelected: cloudGenerationSelected,
+                    queuedTitle: tvQueuedStateTitle,
+                    displayErrorMessage: cloudAwareErrorMessage,
                     onStart: startProcessing,
                     onRetry: {
                         runner.retry(episode: episode, context: modelContext, configuration: settings.configuration)
@@ -66,12 +69,14 @@ extension EpisodeDetailView {
             }
         } else if isLoadingSegments {
             TVCenteredStatusPanel(
+                state: .loading,
                 systemImage: "text.quote",
                 title: L10n.string("episode_detail.loading_bilingual_subtitles", fallback: "Loading bilingual subtitles"),
                 message: L10n.string("episode_detail.ready_to_play_content", fallback: "Ready to play content")
             )
         } else if segmentLoadError != nil {
             TVCenteredStatusPanel(
+                state: .failure,
                 systemImage: "exclamationmark.triangle",
                 title: L10n.string("episode_detail.failed_to_read_bilingual_subtitles", fallback: "Failed to read bilingual subtitles"),
                 message: segmentLoadError ?? L10n.string("episode_detail.please_go_back_and_re_enter_this_episode", fallback: "Please go back and re-enter this episode.")
@@ -264,12 +269,16 @@ private struct TVEpisodeActionShelf: View {
     }
 
     let episode: EpisodeRecord
-    let progressValue: Double
     let progressStepTitle: String
     let processingAction: PodcastEpisodeProcessingAction
     let hasGenerationKeys: Bool
     let hasASRKey: Bool
     let hasTranslationKey: Bool
+    let cloudState: CloudContentGenerationState
+    let cloudSelected: Bool
+    let queuedTitle: String
+    /// Localized failure text (cloud codes resolved by the WP14 presenter).
+    let displayErrorMessage: String?
     let onStart: () -> Void
     let onRetry: () -> Void
     let cloudCheckRequired: Bool
@@ -316,16 +325,33 @@ private struct TVEpisodeActionShelf: View {
                 )
                 .font(.title2.bold())
                 Spacer()
-                Text(progressValue.formatted(.percent.precision(.fractionLength(0))))
-                    .font(.title2.monospacedDigit().weight(.semibold))
+
             }
-            Text(displayMessage)
+            PodcastGenerationProgressView(episode: episode, showsBar: false)
                 .font(.title3)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
-            ProgressView(value: progressValue)
-                .progressViewStyle(.linear)
-                .accessibilityIdentifier("podcast.processing-progress")
+            PodcastPipelineStageRail(step: episode.pipelineStep)
+            if cloudSelected, cloudState.audioReady, !cloudState.subtitlesReady {
+                Label(
+                    L10n.string(
+                        "cloud.audio_ready",
+                        fallback: "Audio is ready. Bilingual subtitles are still being generated."
+                    ),
+                    systemImage: "waveform.circle.fill"
+                )
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(LinguaTheme.success)
+                .accessibilityIdentifier("podcast.cloud-audio-ready")
+            }
+            if cloudSelected, let lastUpdated = cloudState.lastUpdated {
+                Text(L10n.format(
+                    "cloud.last_updated",
+                    fallback: "Last updated %@",
+                    lastUpdated.formatted(date: .omitted, time: .shortened)
+                ))
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+            }
             Text(L10n.string("episode_detail.processing_continues_in_background", fallback: "You can leave this page. Processing will continue in the background."))
                 .font(.callout)
                 .foregroundStyle(.tertiary)
@@ -347,6 +373,8 @@ private struct TVEpisodeActionShelf: View {
                 )
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("podcast.processing-progress")
     }
 
     private var actionableContent: some View {
@@ -397,13 +425,24 @@ private struct TVEpisodeActionShelf: View {
                         action: onStart
                     )
                 } else if processingAction == .retry {
-                    actionButton(
-                        title: L10n.string("episode_detail.retry", fallback: "Retry"),
-                        systemImage: "arrow.clockwise",
-                        focus: .retry,
-                        identifier: "subtitle.retry",
-                        action: onRetry
-                    )
+                    if cloudState.retryable {
+                        actionButton(
+                            title: L10n.string("episode_detail.retry", fallback: "Retry"),
+                            systemImage: "arrow.clockwise",
+                            focus: .retry,
+                            identifier: "subtitle.retry",
+                            action: onRetry
+                        )
+                    } else {
+                        Text(L10n.string(
+                            "cloud.error.not_retryable",
+                            fallback: "This failure cannot be retried directly. Use Clear and regenerate to start over."
+                        ))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 280)
+                        .accessibilityIdentifier("podcast.cloud-not-retryable")
+                    }
                     actionButton(
                         title: L10n.string("episodes.clear_and_regenerate", fallback: "Clear and regenerate"),
                         systemImage: "arrow.triangle.2.circlepath",
@@ -416,9 +455,10 @@ private struct TVEpisodeActionShelf: View {
                 if !cloudCheckRequired && processingAction == .openSettings {
                     settingsButton
                         .buttonStyle(.borderedProminent)
-                } else if processingAction == .retry {
+                } else if !cloudCheckRequired && processingAction == .retry {
                     settingsButton
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.gray)
                 }
             }
             .frame(minWidth: 320)
@@ -429,7 +469,7 @@ private struct TVEpisodeActionShelf: View {
     private var stateTitle: some View {
         let title = isFailed
             ? L10n.string("episode_detail.processing_failed", fallback: "Processing did not finish")
-            : L10n.string("episodes.queuing", fallback: "Not processed")
+            : queuedTitle
         if isFailed {
             Text(title)
                 .font(.title2.bold())
@@ -442,7 +482,7 @@ private struct TVEpisodeActionShelf: View {
 
     private var stateMessage: String {
         if isFailed {
-            return episode.errorMessage ?? displayMessage
+            return displayErrorMessage ?? displayMessage
         }
         return L10n.string(
             "episode_detail.process_to_play_and_view_bilingual_subtitles",
@@ -520,24 +560,30 @@ private struct TVEpisodeActionShelf: View {
 }
 
 private struct TVCenteredStatusPanel: View {
+    enum State { case loading, information, failure }
+    var state: State = .information
     let systemImage: String
     let title: String
     let message: String
 
     var body: some View {
         VStack(spacing: 16) {
-            ProgressView()
-                .opacity(systemImage == "text.quote" ? 1 : 0)
+            if state == .loading { ProgressView() }
             Image(systemName: systemImage)
                 .font(.system(size: 48, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(state == .failure ? LinguaTheme.danger : LinguaTheme.secondaryText)
             Text(title)
                 .font(.title2.bold())
             Text(message)
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            if state == .failure {
+                Text(L10n.string("empty.return_and_retry", fallback: "Return to the previous page and try again."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(38)
         .frame(maxWidth: 600)
@@ -685,7 +731,7 @@ private struct TVPlayerBar: View {
 
             HStack(spacing: 16) {
                 Text(formatTime(player.currentTime))
-                ProgressView(value: player.currentTime, total: max(player.duration, 1))
+                LinguaProgressBar(value: player.currentTime / max(player.duration, 1))
                     .accessibilityIdentifier("player.progress")
                 Text(formatTime(player.duration))
             }

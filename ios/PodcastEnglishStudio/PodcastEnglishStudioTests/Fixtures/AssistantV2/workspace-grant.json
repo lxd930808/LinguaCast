@@ -1,0 +1,11 @@
+{
+  "alias": "notes",
+  "permission": "read",
+  "allowedExtensions": [
+    ".md",
+    ".txt"
+  ],
+  "maxFileBytes": 2097152,
+  "grantedAt": "2026-09-03T01:00:00Z",
+  "status": "ready"
+}

@@ -47,6 +47,10 @@ jobs:
         working-directory: Packages/PlayerKit
         run: swift test
 
+      - name: Test ChineseTTS
+        working-directory: Packages/ChineseTTS
+        run: swift test
+
       - name: Generate Xcode project
         working-directory: ios/PodcastEnglishStudio
         run: xcodegen generate

@@ -19,7 +19,8 @@ let package = Package(
         .testTarget(
             name: "PodcastEnglishStudioTests",
             dependencies: ["PodcastEnglishStudioCore"],
-            path: "PodcastEnglishStudioTests"
+            path: "PodcastEnglishStudioTests",
+            resources: [.copy("Fixtures")]
         )
     ]
 )

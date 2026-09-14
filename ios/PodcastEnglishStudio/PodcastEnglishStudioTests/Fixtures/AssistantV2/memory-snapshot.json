@@ -1,0 +1,30 @@
+{
+  "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "entries": [
+    {
+      "memoryEntryId": "me_01ARZ3NDEKTSV4RRFFQ69G5FJ0",
+      "scope": "research",
+      "type": "finding",
+      "content": "Search metadata discusses AI tooling in accounting firms.",
+      "status": "active",
+      "sourceArtifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD1",
+      "hypothesis": false,
+      "createdAt": "2026-09-03T01:08:00Z",
+      "confirmedAt": "2026-09-03T01:08:00Z"
+    }
+  ],
+  "proposals": [
+    {
+      "proposalId": "mp_01ARZ3NDEKTSV4RRFFQ69G5FH0",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "content": "Write future reports in Simplified Chinese by default.",
+      "reason": "User asked for Chinese output in this research.",
+      "status": "pending",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "expiresAt": "2026-09-10T01:00:00Z",
+      "confirmedAt": null,
+      "rejectedAt": null,
+      "memoryEntryId": null
+    }
+  ]
+}

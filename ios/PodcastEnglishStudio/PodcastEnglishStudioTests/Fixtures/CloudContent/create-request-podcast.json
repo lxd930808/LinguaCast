@@ -1,0 +1,15 @@
+{
+  "contentType": "podcast_episode",
+  "contentKey": "podcast:9f2c1ab7d4e68013:5b7d9e0f2a4c6183",
+  "source": {
+    "platform": "rss",
+    "sourceId": "urn:uuid:8f7c2d1e-9a4b-4c5d-8e6f-0a1b2c3d4e5f",
+    "url": "https://media.example.com/episodes/ep-001.mp3",
+    "feedUrl": "https://example.com/podcast/feed.xml",
+    "title": "Episode 1: Slow English News"
+  },
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "clientArtifactSchemaVersion": 1
+}

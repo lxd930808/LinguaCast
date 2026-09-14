@@ -49,6 +49,8 @@ packages:
     path: ../../Packages/PlayerKit
   CloudSyncKit:
     path: ../../Packages/CloudSyncKit
+  ChineseTTS:
+    path: ../../Packages/ChineseTTS
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher.git
     exactVersion: 8.11.0
@@ -92,6 +94,11 @@ targets:
           # “cannot co-exist with other .strings tables with the same name”，故排除。
           - "Support/en.lproj/InfoPlist.strings"
           - "Support/zh-Hans.lproj/InfoPlist.strings"
+    postBuildScripts:
+      - name: Copy local Chinese voice resources
+        script: |
+          "${SRCROOT}/scripts/copy-chinese-tts-resources.sh"
+        basedOnDependencyAnalysis: false
     dependencies:
       - package: PodcastEnglishStudio
         product: PodcastEnglishStudioCore
@@ -101,6 +108,9 @@ targets:
         product: PlayerKit
       - package: CloudSyncKit
         product: CloudSyncKit
+      - package: ChineseTTS
+        product: ChineseSynthesis
+        platformFilter: iOS
       - package: Kingfisher
         product: Kingfisher
       - package: YouTubeKit
@@ -109,8 +119,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.LinguaCast
         PRODUCT_NAME: "$(TARGET_NAME)"
-        MARKETING_VERSION: "0.6"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.9"
+        CURRENT_PROJECT_VERSION: "3"
         SWIFT_VERSION: "5.0"
         # 关闭编译器字符串提取：本项目统一走 L10n helper（key 为 String 变量，非字面量），
         # 编译器提取对其无效，只会产生 "References to this key could not be found" 误报。

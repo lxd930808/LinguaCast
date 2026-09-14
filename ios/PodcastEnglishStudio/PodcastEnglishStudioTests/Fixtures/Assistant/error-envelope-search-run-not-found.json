@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "SEARCH_RUN_NOT_FOUND",
+    "message": "Unknown search run",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69G5FF0"
+  }
+}

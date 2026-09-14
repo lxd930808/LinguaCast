@@ -1045,6 +1045,7 @@ public enum TranslationProviderPolicy {
     public static let dashScopeProviderID = "dashscope"
     public static let deepSeekProviderID = "deepseek"
     public static let cerebrasProviderID = "cerebras"
+    public static let openRouterProviderID = "openrouter"
 
     public static let defaultDashScopeBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     public static let defaultDashScopeModelID = "qwen-turbo"
@@ -1054,29 +1055,36 @@ public enum TranslationProviderPolicy {
     public static let defaultCerebrasBaseURL = "https://api.cerebras.ai/v1"
     public static let defaultCerebrasModelID = "gpt-oss-120b"
     public static let defaultCerebrasReasoningEffort = "medium"
+    public static let defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
+    public static let defaultOpenRouterModelID = "~openai/gpt-latest"
+    public static let defaultOpenRouterReasoningEffort = "medium"
 
     public static let deepSeekReasoningEffortOptions = ["high", "max"]
     public static let cerebrasReasoningEffortOptions = ["low", "medium", "high"]
+    public static let openRouterReasoningEffortOptions = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
     private static let knownDefaultBaseURLs = [
         defaultDashScopeBaseURL,
         defaultDeepSeekBaseURL,
-        defaultCerebrasBaseURL
+        defaultCerebrasBaseURL,
+        defaultOpenRouterBaseURL
     ]
     private static let knownDefaultModelIDs = [
         defaultDashScopeModelID,
         defaultDeepSeekModelID,
-        defaultCerebrasModelID
+        defaultCerebrasModelID,
+        defaultOpenRouterModelID
     ]
     private static let knownDefaultReasoningEfforts = [
         defaultDeepSeekReasoningEffort,
-        defaultCerebrasReasoningEffort
+        defaultCerebrasReasoningEffort,
+        defaultOpenRouterReasoningEffort
     ]
 
     public static func normalizedProvider(_ value: String) -> String {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
-        case deepSeekProviderID, cerebrasProviderID:
+        case deepSeekProviderID, cerebrasProviderID, openRouterProviderID:
             return normalized
         default:
             return dashScopeProviderID
@@ -1096,6 +1104,12 @@ public enum TranslationProviderPolicy {
                 baseURL: defaultCerebrasBaseURL,
                 modelID: defaultCerebrasModelID,
                 reasoningEffort: defaultCerebrasReasoningEffort
+            )
+        case openRouterProviderID:
+            return TranslationProviderDefaults(
+                baseURL: defaultOpenRouterBaseURL,
+                modelID: defaultOpenRouterModelID,
+                reasoningEffort: defaultOpenRouterReasoningEffort
             )
         default:
             return TranslationProviderDefaults(
@@ -1157,19 +1171,36 @@ public enum TranslationProviderPolicy {
             return deepSeekReasoningEffortOptions.contains(trimmed) ? trimmed : defaultDeepSeekReasoningEffort
         case cerebrasProviderID:
             return cerebrasReasoningEffortOptions.contains(trimmed) ? trimmed : defaultCerebrasReasoningEffort
+        case openRouterProviderID:
+            return openRouterReasoningEffortOptions.contains(trimmed) ? trimmed : defaultOpenRouterReasoningEffort
         default:
             return ""
         }
     }
 
+    /// Reasoning effort values each provider can accept; empty when the provider
+    /// has no reasoning effort control, so settings UI stays free of provider checks.
+    public static func reasoningEffortOptions(forProvider provider: String) -> [String] {
+        switch normalizedProvider(provider) {
+        case deepSeekProviderID:
+            return deepSeekReasoningEffortOptions
+        case cerebrasProviderID:
+            return cerebrasReasoningEffortOptions
+        case openRouterProviderID:
+            return openRouterReasoningEffortOptions
+        default:
+            return []
+        }
+    }
+
     public static func sendsReasoningEffort(provider: String) -> Bool {
         let normalized = normalizedProvider(provider)
-        return normalized == deepSeekProviderID || normalized == cerebrasProviderID
+        return normalized == deepSeekProviderID || normalized == cerebrasProviderID || normalized == openRouterProviderID
     }
 
     public static func retriesTransientHTTPStatus(provider: String) -> Bool {
         let normalized = normalizedProvider(provider)
-        return normalized == deepSeekProviderID || normalized == cerebrasProviderID
+        return normalized == deepSeekProviderID || normalized == cerebrasProviderID || normalized == openRouterProviderID
     }
 
     private static func shouldReplaceKnownValue(_ value: String, knownValues: [String]) -> Bool {
@@ -1206,7 +1237,14 @@ public enum TranslationChatRequestPolicy {
         ]
 
         if TranslationProviderPolicy.sendsReasoningEffort(provider: normalizedProvider) {
-            body["reasoning_effort"] = normalizedReasoningEffort(reasoningEffort, provider: normalizedProvider)
+            let effort = normalizedReasoningEffort(reasoningEffort, provider: normalizedProvider)
+            if TranslationProviderPolicy.normalizedProvider(normalizedProvider)
+                == TranslationProviderPolicy.openRouterProviderID {
+                // OpenRouter accepts a nested reasoning object rather than the flat field.
+                body["reasoning"] = ["effort": effort]
+            } else {
+                body["reasoning_effort"] = effort
+            }
         }
         // DeepSeek JSON Output: force json_object and cap tokens so structured replies stay intact.
         if TranslationProviderPolicy.normalizedProvider(normalizedProvider)

@@ -5,30 +5,36 @@ import CloudSyncKit
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(CloudSyncCoordinator.self) private var cloudSync
+    #if os(iOS)
     @State private var showingMobileSetup = false
     @State private var showingAdvancedCloud = false
+    @State private var showingAdvancedCloudService = false
+    @State private var showingLegacyLocalPipeline = false
     @State private var showingOptionalTTS = false
     @State private var showingClearSubtitleCacheConfirmation = false
     @State private var saveMessage: String?
+    @State private var cloudActiveJobCount = 0
     @State private var localMediaEnabled = false
     @State private var localMediaBaseURL = ""
     @State private var localMediaToken = ""
     @State private var localMediaMode = YTLocalMediaMode.mp4
     @State private var localMediaPreferredHeight = 720
+    @AppStorage(AssistantV2FeatureFlag.defaultsKey) private var assistantV2Enabled = false
+    #endif
 
     var body: some View {
+        #if os(tvOS)
+        TVSettingsRootScreen()
+        #else
+        iOSBody
+        #endif
+    }
+
+    #if os(iOS)
+    @ViewBuilder
+    private var iOSBody: some View {
         @Bindable var settings = settings
         Form {
-            #if os(tvOS)
-            Section {
-                tvOSSettingsDashboard
-            }
-            .listRowBackground(Color.clear)
-
-            Section(L10n.string("settings.local_media_backend", fallback: "Cloud / Local Media Backend")) {
-                localMediaBackendFields
-            }
-            #else
             Section {
                 iOSSettingsOverview
             }
@@ -67,6 +73,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section(L10n.string("settings.cloud_service", fallback: "Cloud Generation Service")) {
+                cloudServiceFields
+            }
+
+            Section(L10n.string("settings.assistant_service", fallback: "Research Assistant Service")) {
+                assistantServiceFields
+            }
+
             Section(L10n.string("settings.configuration_progress", fallback: "Setup Progress")) {
                 SetupChecklistView(
                     readiness: ConfigurationReadiness(configuration: settings.configuration),
@@ -89,8 +103,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section(L10n.string("settings.dashscope_asr", fallback: "DashScope ASR")) {
-                SecureField(L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), text: $settings.configuration.dashscopeAPIKey)
+            if !cloudHidesLegacyKeys {
+                Section(L10n.string("settings.dashscope_asr", fallback: "DashScope ASR")) {
+                    SecureField(L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), text: $settings.configuration.dashscopeAPIKey)
+                        .accessibilityIdentifier("settings.dashscope-api-key")
+                }
             }
 
             Section(L10n.string("settings.translation", fallback: "Translation")) {
@@ -123,25 +140,8 @@ struct SettingsView: View {
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                Picker(L10n.string("settings.provider", fallback: "Provider"), selection: $settings.configuration.translationProvider) {
-                    Text(L10n.string("provider.dashscope", fallback: "DashScope")).tag("dashscope")
-                    Text(L10n.string("provider.deepseek", fallback: "DeepSeek")).tag("deepseek")
-                    Text(L10n.string("provider.cerebras", fallback: "Cerebras")).tag("cerebras")
-                }
-                .onChange(of: settings.configuration.translationProvider) { _, provider in
-                    applyTranslationProviderDefaults(provider)
-                }
-                SecureField(L10n.string("settings.translation_api_key", fallback: "Translation API Key"), text: $settings.configuration.translationAPIKey)
-                TextField(L10n.string("settings.base_url", fallback: "Base URL"), text: $settings.configuration.translationBaseURL)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                TextField(L10n.string("settings.model_id", fallback: "Model ID"), text: $settings.configuration.translationModelID)
-                    .textInputAutocapitalization(.never)
-                Picker(L10n.string("settings.reasoning_effort", fallback: "Reasoning Effort"), selection: $settings.configuration.translationReasoningEffort) {
-                    Text(L10n.string("settings.reasoning_low", fallback: "Low")).tag("low")
-                    Text(L10n.string("settings.reasoning_medium", fallback: "Medium")).tag("medium")
-                    Text(L10n.string("settings.reasoning_high", fallback: "High")).tag("high")
-                    Text(L10n.string("settings.reasoning_max", fallback: "Max")).tag("max")
+                if !cloudHidesLegacyKeys {
+                    translationLocalOnlyFields
                 }
             }
 
@@ -157,22 +157,47 @@ struct SettingsView: View {
             }
 
             Section(L10n.string("settings.advanced", fallback: "Advanced")) {
-                #if os(tvOS)
-                advancedCloudFields
-                optionalTTSFields
-                #else
-                DisclosureGroup(L10n.string("settings.aliyun_oss_optional", fallback: "Aliyun OSS (optional)"), isExpanded: $showingAdvancedCloud) {
-                    advancedCloudFields
+                // WP14 task 6: the content-service token lives only in this
+                // advanced disclosure (or mobile QR setup) and is masked
+                // everywhere else.
+                DisclosureGroup(L10n.string("settings.cloud_service_advanced", fallback: "Cloud Service (Advanced)"), isExpanded: $showingAdvancedCloudService) {
+                    TextField(L10n.string("settings.cloud_base_url", fallback: "Service Base URL"), text: $settings.configuration.contentServiceBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    SecureField(L10n.string("settings.cloud_access_token", fallback: "Access Token"), text: $settings.configuration.contentServiceToken)
+                    Text(L10n.string("settings.cloud_token_privacy_note", fallback: "The token is stored in the Keychain and never shown in full."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if cloudHidesLegacyKeys {
+                    // WP14 task 8: with cloud generation active, the legacy
+                    // on-device keys leave the normal sections but stay
+                    // readable/editable here; switching the backend back to
+                    // On-Device explicitly restores the old behavior.
+                    DisclosureGroup(L10n.string("settings.legacy_local_pipeline", fallback: "Legacy On-Device Pipeline"), isExpanded: $showingLegacyLocalPipeline) {
+                        Text(L10n.string(
+                            "settings.legacy_local_pipeline_help",
+                            fallback: "These keys are only used by the on-device pipeline. They remain editable here, and switching the generation backend back to On-Device restores the previous behavior."
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        SecureField(L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), text: $settings.configuration.dashscopeAPIKey)
+                        translationLocalOnlyFields
+                        advancedCloudFields
+                    }
+                } else {
+                    DisclosureGroup(L10n.string("settings.aliyun_oss_optional", fallback: "Aliyun OSS (optional)"), isExpanded: $showingAdvancedCloud) {
+                        advancedCloudFields
+                    }
                 }
 
                 DisclosureGroup(L10n.string("settings.optional_tts", fallback: "Optional TTS"), isExpanded: $showingOptionalTTS) {
                     optionalTTSFields
                 }
-                #endif
             }
 
             SubtitlePresentationSettingsSection(settings: settings)
-            #endif
 
             if let error = settings.lastError {
                 Section {
@@ -187,28 +212,13 @@ struct SettingsView: View {
                 }
             }
         }
-        #if os(iOS)
         .scrollContentBackground(.hidden)
-        #endif
         .background(LinguaScreenBackground())
         .foregroundStyle(LinguaTheme.primaryText)
         .tint(LinguaTheme.accent)
         .accessibilityIdentifier("screen.settings")
         .navigationTitle(L10n.string("navigation.settings", fallback: "Settings"))
         .toolbar {
-            #if os(tvOS)
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showingMobileSetup = true
-                } label: {
-                    ViewThatFits(in: .horizontal) {
-                        Label(L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"), systemImage: "qrcode")
-                        Image(systemName: "qrcode")
-                    }
-                }
-                .accessibilityLabel(L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"))
-            }
-            #endif
             ToolbarItem(placement: .topBarTrailing) {
                 Button(L10n.string("common.save", fallback: "Save")) {
                     persistLocalMediaBackendSettings()
@@ -245,6 +255,13 @@ struct SettingsView: View {
         .onDisappear {
             // Drop draft edits that were not committed via Save; players read committed only.
             settings.discardUnsavedChanges()
+        }
+        .task {
+            // WP14 diagnostics: snapshot the in-flight remote job count. Kept
+            // out of UI tests so fake cloud states stay fully offline.
+            guard !UITestSupport.isEnabled else { return }
+            guard let store = try? RemoteContentJobStore() else { return }
+            cloudActiveJobCount = (try? await store.nonTerminalSnapshots().count) ?? 0
         }
     }
 
@@ -302,7 +319,188 @@ struct SettingsView: View {
         YTPlaybackBackend.resetLocalResolverCache()
     }
 
-    #if os(iOS)
+    // MARK: - Cloud generation service (V10 / WP14)
+
+    /// Cloud generation active: backend switched to cloud AND the service is
+    /// enabled. While active, the legacy on-device keys leave the normal
+    /// sections (task 8); they stay readable/editable in Advanced.
+    private var cloudHidesLegacyKeys: Bool {
+        settings.configuration.generationBackendMode == .cloud
+            && settings.configuration.contentServiceEnabled
+    }
+
+    private var cloudServiceStatusTitle: String {
+        let configuration = settings.configuration
+        guard configuration.contentServiceEnabled else {
+            return L10n.string("settings.cloud_status_disabled", fallback: "Disabled")
+        }
+        guard !configuration.contentServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return L10n.string("settings.cloud_status_missing_token", fallback: "Access token not configured")
+        }
+        return L10n.string("settings.cloud_status_ready", fallback: "Ready")
+    }
+
+    /// Token is never shown in full (task 6): masked value only.
+    private var maskedCloudTokenTitle: String {
+        let masked = CloudTokenMasking.masked(settings.configuration.contentServiceToken)
+        return masked.isEmpty
+            ? L10n.string("settings.cloud_token_not_set", fallback: "Not set")
+            : masked
+    }
+
+    @ViewBuilder
+    private var cloudServiceFields: some View {
+        @Bindable var settings = settings
+        Toggle(
+            L10n.string("settings.cloud_service_enabled", fallback: "Enable Cloud Generation Service"),
+            isOn: $settings.configuration.contentServiceEnabled
+        )
+        .accessibilityIdentifier("settings.cloud-enabled")
+        // Canary toggle (task 7): local stays selectable as the rollback path.
+        Picker(
+            L10n.string("settings.generation_backend", fallback: "Generation Backend"),
+            selection: $settings.configuration.generationBackend
+        ) {
+            Text(L10n.string("settings.generation_backend_local", fallback: "On-Device (Legacy)"))
+                .tag(GenerationBackend.local.rawValue)
+            Text(L10n.string("settings.generation_backend_cloud", fallback: "Cloud Service"))
+                .tag(GenerationBackend.cloud.rawValue)
+        }
+        .accessibilityIdentifier("settings.generation-backend")
+        LabeledContent(
+            L10n.string("settings.cloud_service_status", fallback: "Status"),
+            value: cloudServiceStatusTitle
+        )
+        .accessibilityIdentifier("settings.cloud-status")
+        LabeledContent(
+            L10n.string("settings.cloud_base_url", fallback: "Service Base URL"),
+            value: settings.configuration.normalizedContentServiceBaseURL
+        )
+        LabeledContent(
+            L10n.string("settings.cloud_access_token", fallback: "Access Token"),
+            value: maskedCloudTokenTitle
+        )
+        .accessibilityIdentifier("settings.cloud-token")
+        // Diagnostics (task 5): in-flight remote job count from the WP11 store.
+        LabeledContent(
+            L10n.string("settings.cloud_active_jobs", fallback: "Active Cloud Jobs"),
+            value: String(cloudActiveJobCount)
+        )
+        .accessibilityIdentifier("settings.cloud-active-jobs")
+        Text(L10n.string(
+            "settings.cloud_service_help",
+            fallback: "Cloud generation runs on your own server, so this device does not need DashScope or translation keys."
+        ))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var assistantServiceStatusTitle: String {
+        let configuration = settings.configuration
+        guard configuration.assistantServiceEnabled else {
+            return L10n.string("settings.assistant_status_disabled", fallback: "Disabled")
+        }
+        guard !configuration.assistantServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return L10n.string("settings.assistant_status_missing_token", fallback: "Access token not configured")
+        }
+        return L10n.string("settings.assistant_status_ready", fallback: "Ready")
+    }
+
+    private var maskedAssistantTokenTitle: String {
+        let masked = CloudTokenMasking.masked(settings.configuration.assistantServiceToken)
+        return masked.isEmpty
+            ? L10n.string("settings.assistant_token_not_set", fallback: "Not set")
+            : masked
+    }
+
+    @ViewBuilder
+    private var assistantServiceFields: some View {
+        @Bindable var settings = settings
+        Toggle(
+            L10n.string("settings.assistant_service_enabled", fallback: "Enable Research Assistant"),
+            isOn: $settings.configuration.assistantServiceEnabled
+        )
+        .accessibilityIdentifier("settings.assistant-enabled")
+        LabeledContent(
+            L10n.string("settings.assistant_service_status", fallback: "Status"),
+            value: assistantServiceStatusTitle
+        )
+        TextField(
+            L10n.string("settings.assistant_base_url", fallback: "Assistant Base URL"),
+            text: $settings.configuration.assistantServiceBaseURL
+        )
+        .textInputAutocapitalization(.never)
+        .keyboardType(.URL)
+        .accessibilityIdentifier("settings.assistant-base-url")
+        SecureField(
+            L10n.string("settings.assistant_access_token", fallback: "Assistant Access Token"),
+            text: $settings.configuration.assistantServiceToken
+        )
+        .accessibilityIdentifier("settings.assistant-token")
+        LabeledContent(
+            L10n.string("settings.assistant_access_token", fallback: "Assistant Access Token"),
+            value: maskedAssistantTokenTitle
+        )
+        Text(L10n.string(
+            "settings.assistant_service_help",
+            fallback: "The assistant service is separate from cloud generation. It uses its own HTTPS address and token."
+        ))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        Toggle(
+            L10n.string("settings.assistant_v2_enabled", fallback: "Use V15 workspace research"),
+            isOn: $assistantV2Enabled
+        )
+        .accessibilityIdentifier("settings.assistant-v2-enabled")
+        Text(L10n.string(
+            "settings.assistant_v2_help",
+            fallback: "When on, new research uses the V15 workspace API. Leave this off to keep the previous assistant experience."
+        ))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    /// Translation provider / key / endpoint fields used only by the legacy
+    /// on-device pipeline. Shared between the normal Translation section and
+    /// the Advanced legacy disclosure when cloud generation is active.
+    @ViewBuilder
+    private var translationLocalOnlyFields: some View {
+        @Bindable var settings = settings
+        Picker(L10n.string("settings.provider", fallback: "Provider"), selection: $settings.configuration.translationProvider) {
+            Text(L10n.string("provider.dashscope", fallback: "DashScope")).tag("dashscope")
+            Text(L10n.string("provider.deepseek", fallback: "DeepSeek")).tag("deepseek")
+            Text(L10n.string("provider.cerebras", fallback: "Cerebras")).tag("cerebras")
+            Text(L10n.string("provider.openrouter", fallback: "OpenRouter")).tag("openrouter")
+        }
+        .onChange(of: settings.configuration.translationProvider) { _, provider in
+            applyTranslationProviderDefaults(provider)
+        }
+        SecureField(L10n.string("settings.translation_api_key", fallback: "Translation API Key"), text: $settings.configuration.translationAPIKey)
+        TextField(L10n.string("settings.base_url", fallback: "Base URL"), text: $settings.configuration.translationBaseURL)
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            #endif
+        TextField(L10n.string("settings.model_id", fallback: "Model ID"), text: $settings.configuration.translationModelID)
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            #endif
+        if !TranslationProviderPolicy.reasoningEffortOptions(
+            forProvider: settings.configuration.translationProvider
+        ).isEmpty {
+            Picker(L10n.string("settings.reasoning_effort", fallback: "Reasoning Effort"), selection: $settings.configuration.translationReasoningEffort) {
+                ForEach(
+                    TranslationProviderPolicy.reasoningEffortOptions(
+                        forProvider: settings.configuration.translationProvider
+                    ),
+                    id: \.self
+                ) { effort in
+                    Text(reasoningEffortTitle(effort)).tag(effort)
+                }
+            }
+        }
+    }
+
     private var iOSSettingsOverview: some View {
         let readiness = ConfigurationReadiness(configuration: settings.configuration)
         return LazyVGrid(
@@ -363,184 +561,6 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-    #endif
-
-    #if os(tvOS)
-    private var tvOSSettingsDashboard: some View {
-        @Bindable var settings = settings
-        return LazyVGrid(
-            columns: [
-                GridItem(.flexible(), spacing: 24, alignment: .top),
-                GridItem(.flexible(), spacing: 24, alignment: .top)
-            ],
-            alignment: .leading,
-            spacing: 24
-        ) {
-            LinguaCard(padding: 24) {
-                LinguaSectionHeader(title: L10n.string("settings.icloud_sync", fallback: "iCloud Sync"))
-                Label(cloudSync.statusTitle, systemImage: syncStatusIcon)
-                    .font(.title3.bold())
-                    .foregroundStyle(syncStatusColor)
-                Text(cloudSync.statusDetail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                LabeledContent(
-                    L10n.string("settings.icloud_subtitle_cache", fallback: "Cloud Subtitle Cache"),
-                    value: subtitleCacheSummary
-                )
-                if cloudSync.phase == .awaitingAccountConfirmation {
-                    Button(L10n.string("settings.confirm_merge_into_new_icloud", fallback: "Confirm merge into new iCloud")) {
-                        cloudSync.confirmAccountMigration()
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button {
-                        guard !UITestSupport.isEnabled else { return }
-                        Task { await cloudSync.syncNow() }
-                    } label: {
-                        Label(
-                            L10n.string("settings.sync_now", fallback: "Sync now"),
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(UITestSupport.isEnabled || cloudSync.phase == .syncing || cloudSync.phase == .noAccount)
-                }
-                if cloudSync.subtitleArtifactCount > 0 {
-                    Button(
-                        L10n.string("settings.clear_icloud_subtitle_cache", fallback: "Clear iCloud Subtitle Cache"),
-                        role: .destructive
-                    ) {
-                        showingClearSubtitleCacheConfirmation = true
-                    }
-                }
-            }
-
-            LinguaCard(padding: 24) {
-                LinguaSectionHeader(title: L10n.string("settings.configuration_progress", fallback: "Setup Progress"))
-                SetupChecklistView(
-                    readiness: ConfigurationReadiness(configuration: settings.configuration),
-                    showsSettingsButton: false
-                ) {}
-                Button {
-                    showingMobileSetup = true
-                } label: {
-                    Label(
-                        L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"),
-                        systemImage: "qrcode"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            LinguaCard(padding: 24) {
-                LinguaSectionHeader(title: L10n.string("settings.translation", fallback: "Translation"))
-                LabeledContent(
-                    L10n.string("settings.subtitle_target", fallback: "Subtitle Translation Language"),
-                    value: settings.configuration.translationTarget.autonym
-                )
-                LabeledContent(
-                    L10n.string("settings.provider", fallback: "Provider"),
-                    value: settings.configuration.translationProvider.capitalized
-                )
-                Picker(
-                    L10n.string("settings.translation_quality_mode", fallback: "Translation Quality"),
-                    selection: $settings.configuration.translationQualityMode
-                ) {
-                    Text(L10n.string("settings.translation_quality_quality", fallback: "Quality (reflective)"))
-                        .tag(TranslationQualityMode.quality.rawValue)
-                    Text(L10n.string("settings.translation_quality_fast", fallback: "Fast (direct)"))
-                        .tag(TranslationQualityMode.fast.rawValue)
-                }
-                Text(
-                    L10n.string(
-                        "settings.subtitle_target_help",
-                        fallback: "New subtitles use this language. Existing translations remain available on this device."
-                    )
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                Button {
-                    showingMobileSetup = true
-                } label: {
-                    Label(
-                        L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"),
-                        systemImage: "iphone.gen3"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            LinguaCard(padding: 24) {
-                LinguaSectionHeader(title: L10n.string("settings.content_filter", fallback: "Content Filter"))
-                Toggle(
-                    L10n.string("settings.content_filter_enabled", fallback: "Enable Content Filter"),
-                    isOn: $settings.configuration.contentFilterEnabled
-                )
-                Text(
-                    settings.configuration.contentFilterKeywords.isEmpty
-                        ? L10n.string(
-                            "settings.content_filter_help",
-                            fallback: "Matching episodes and videos are hidden from lists. Keywords apply instantly; the agent instruction uses the configured Translation LLM when available."
-                        )
-                        : settings.configuration.contentFilterKeywords
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
-                Button {
-                    showingMobileSetup = true
-                } label: {
-                    Label(
-                        L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"),
-                        systemImage: "qrcode"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            LinguaCard(padding: 24) {
-                SubtitlePresentationSettingsSection(settings: settings, wrapsInSection: false)
-            }
-
-            LinguaCard(padding: 24) {
-                LinguaSectionHeader(title: L10n.string("settings.advanced", fallback: "Advanced"))
-                Label(
-                    L10n.string("settings.aliyun_oss_optional", fallback: "Aliyun OSS (optional)"),
-                    systemImage: "externaldrive"
-                )
-                Label(
-                    L10n.string("settings.optional_tts", fallback: "Optional TTS"),
-                    systemImage: "waveform"
-                )
-                Text(
-                    L10n.string(
-                        "mobile_setup.scan_instructions",
-                        fallback: "Scan with the iPhone camera, then configure APIs, Podcast subscriptions, or YouTube channels in Safari."
-                    )
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                Button {
-                    showingMobileSetup = true
-                } label: {
-                    Label(
-                        L10n.string("settings.mobile_setup", fallback: "Set Up by Phone"),
-                        systemImage: "qrcode"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding(.vertical, 12)
-    }
-    #endif
 
     private var subtitleCacheSummary: String {
         let size = ByteCountFormatter.string(
@@ -620,4 +640,26 @@ struct SettingsView: View {
         settings.configuration.translationModelID = defaults.modelID
         settings.configuration.translationReasoningEffort = defaults.reasoningEffort
     }
+
+    private func reasoningEffortTitle(_ effort: String) -> String {
+        switch effort {
+        case "none":
+            return L10n.string("settings.reasoning_none", fallback: "None")
+        case "minimal":
+            return L10n.string("settings.reasoning_minimal", fallback: "Minimal")
+        case "low":
+            return L10n.string("settings.reasoning_low", fallback: "Low")
+        case "medium":
+            return L10n.string("settings.reasoning_medium", fallback: "Medium")
+        case "high":
+            return L10n.string("settings.reasoning_high", fallback: "High")
+        case "xhigh":
+            return L10n.string("settings.reasoning_xhigh", fallback: "Extra High")
+        case "max":
+            return L10n.string("settings.reasoning_max", fallback: "Max")
+        default:
+            return effort
+        }
+    }
+    #endif
 }

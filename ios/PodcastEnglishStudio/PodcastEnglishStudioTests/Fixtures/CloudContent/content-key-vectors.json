@@ -1,0 +1,57 @@
+{
+  "vectors": [
+    {
+      "name": "podcast-normalizes-case-port-fragment",
+      "contentType": "podcast_episode",
+      "input": {
+        "feedUrl": "HTTPS://Example.COM:443/podcast/feed.xml#frag",
+        "episodeGuid": "  ep-001-über  "
+      },
+      "normalizedFeedUrl": "https://example.com/podcast/feed.xml",
+      "expectedContentKey": "podcast:6a62e3b54d357135:8688591ac0112df8"
+    },
+    {
+      "name": "podcast-nfc-guid",
+      "contentType": "podcast_episode",
+      "input": {
+        "feedUrl": "https://example.com/podcast/feed.xml/",
+        "episodeGuid": "ep-002-ubër"
+      },
+      "normalizedFeedUrl": "https://example.com/podcast/feed.xml",
+      "expectedContentKey": "podcast:6a62e3b54d357135:888d064a30b84d56"
+    },
+    {
+      "name": "podcast-http-default-port",
+      "contentType": "podcast_episode",
+      "input": {
+        "feedUrl": "http://feeds.example.com:80/rss/",
+        "episodeGuid": "guid-42"
+      },
+      "normalizedFeedUrl": "http://feeds.example.com/rss",
+      "expectedContentKey": "podcast:cf59588d139191c8:cfc8e59eb06ee4fc"
+    },
+    {
+      "name": "video-youtube",
+      "contentType": "video",
+      "input": {
+        "platform": "YouTube",
+        "videoId": "dQw4w9WgXcQ"
+      },
+      "expectedContentKey": "video:youtube:dQw4w9WgXcQ"
+    },
+    {
+      "name": "dedupe-key-podcast-quality-zh",
+      "contentType": "podcast_episode",
+      "input": {
+        "ownerScope": "selfhost",
+        "contentType": "podcast_episode",
+        "contentKey": "podcast:6a62e3b54d357135:8688591ac0112df8",
+        "sourceLanguage": "en",
+        "targetLanguage": "zh-Hans",
+        "translationQuality": "quality",
+        "pipelineVersion": "v10.1"
+      },
+      "expectedDedupeKey": "e38892a55373e837a406aabc6daca1af3a722451e5c00b2f6ecfcad1467d7d03"
+    }
+  ]
+}

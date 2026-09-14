@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "createdAt": "2026-09-03T01:00:00Z",
+  "updatedAt": "2026-09-03T01:08:00Z",
+  "artifacts": [
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD0",
+      "kind": "web_page",
+      "status": "ready",
+      "relativePath": "sources/web/pages/01ARZ3NDEKTSV4RRFFQ69G5FD0.md",
+      "mediaType": "text/markdown",
+      "bytes": 1234,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "producer": "fetch_web_page",
+      "sourceURL": "https://example.com/ai-accounting",
+      "contentKey": null,
+      "evidenceLevel": "primary_content"
+    }
+  ]
+}

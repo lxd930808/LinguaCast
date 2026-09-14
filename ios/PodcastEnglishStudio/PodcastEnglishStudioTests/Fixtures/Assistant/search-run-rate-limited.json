@@ -1,0 +1,21 @@
+{
+  "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE4",
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+  "provider": "podcastindex",
+  "query": "Satya Nadella",
+  "status": "failed",
+  "retryAfterSeconds": 30,
+  "createdAt": "2026-08-31T01:14:00Z",
+  "providerStatus": [
+    {
+      "provider": "podcastindex",
+      "status": "rate_limited",
+      "errorCode": "PODCASTINDEX_RATE_LIMITED",
+      "retryAfterSeconds": 30,
+      "acceptedCount": 0
+    }
+  ],
+  "results": [],
+  "warnings": ["PODCASTINDEX_RATE_LIMITED"]
+}

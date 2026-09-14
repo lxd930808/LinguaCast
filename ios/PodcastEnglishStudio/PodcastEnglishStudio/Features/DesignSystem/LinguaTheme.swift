@@ -23,7 +23,7 @@ enum LinguaTheme {
         #if os(tvOS)
         72
         #else
-        16
+        20
         #endif
     }()
 
@@ -144,6 +144,7 @@ struct LinguaStatusChip: View {
     let title: String
     var systemImage: String?
     var tone: Tone = .neutral
+    var font: Font = .caption.weight(.semibold)
 
     var body: some View {
         Label {
@@ -153,7 +154,7 @@ struct LinguaStatusChip: View {
                 Image(systemName: systemImage)
             }
         }
-        .font(.caption.weight(.semibold))
+        .font(font)
         .foregroundStyle(tone.color)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -172,7 +173,7 @@ struct LinguaProgressBar: View {
                     .fill(LinguaTheme.progressTrack)
                 Capsule()
                     .fill(tint)
-                    .frame(width: geometry.size.width * min(max(value, 0), 1))
+                    .frame(width: geometry.size.width * (value.isFinite ? min(max(value, 0), 1) : 0))
             }
         }
         .frame(height: 4)

@@ -67,4 +67,21 @@ final class OpenSourceConfigurationTests: XCTestCase {
             ]
         )
     }
+
+    func testServiceCredentialsStaySecretAndOutOfMobileSetup() {
+        for key in [AppConfigurationKey.contentServiceToken, .assistantServiceToken] {
+            XCTAssertTrue(key.isSecret)
+            XCTAssertFalse(AppConfigurationKey.mobileSetupAllowedKeys.contains(key))
+        }
+        var config = AppConfiguration()
+        config[.contentServiceToken] = "content-test-token"
+        config[.assistantServiceToken] = "assistant-test-token"
+        XCTAssertEqual(config.contentServiceToken, "content-test-token")
+        XCTAssertEqual(config.assistantServiceToken, "assistant-test-token")
+        XCTAssertFalse(config.contentServiceEnabled)
+        XCTAssertFalse(config.assistantServiceEnabled)
+        XCTAssertEqual(AppConfiguration.defaultContentServiceBaseURL, "https://content.example.com")
+        XCTAssertEqual(AppConfiguration.defaultAssistantServiceBaseURL, "https://assistant.example.com")
+    }
+
 }

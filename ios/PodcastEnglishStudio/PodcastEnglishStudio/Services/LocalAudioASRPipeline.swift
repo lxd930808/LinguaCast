@@ -11,7 +11,7 @@ struct LocalAudioASRPipeline {
         apiKey: String,
         checkpointURL: URL,
         downloadedResultURL: URL,
-        onStage: (@Sendable (DashScopeTranscriptionStage) async -> Void)? = nil
+        onStage: (@MainActor (DashScopeTranscriptionStage) async -> Void)? = nil
     ) async throws -> [LearningSegment] {
         let checkpointStore = DashScopeCheckpointStore(fileURL: checkpointURL)
         var segments = try await transcriptionClient.transcribe(

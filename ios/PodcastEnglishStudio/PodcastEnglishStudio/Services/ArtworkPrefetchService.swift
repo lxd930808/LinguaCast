@@ -6,7 +6,7 @@ import Kingfisher
 final class ArtworkPrefetchService {
     static let shared = ArtworkPrefetchService()
 
-    static let maxURLsPerPage = 20
+    static let maxURLsPerPage = ArtworkPrefetchPolicy.maxURLsPerPage
     static let maxConcurrentDownloads = 3
 
     private var activePrefetcher: ImagePrefetcher?
@@ -51,11 +51,13 @@ final class ArtworkPrefetchService {
 }
 
 enum ArtworkPrefetchPolicy {
+    static let maxURLsPerPage = 20
+
     /// Prefer continue-playing URLs, then ready/completed catalog items.
     static func prioritizedURLs(
         continuePlaying: [URL],
         readyCatalog: [URL],
-        limit: Int = ArtworkPrefetchService.maxURLsPerPage
+        limit: Int = maxURLsPerPage
     ) -> [URL] {
         deduplicated(continuePlaying + readyCatalog, limit: limit)
     }
@@ -83,7 +85,7 @@ enum ArtworkPrefetchPolicy {
 
     static func deduplicated(
         _ urls: [URL],
-        limit: Int = ArtworkPrefetchService.maxURLsPerPage
+        limit: Int = maxURLsPerPage
     ) -> [URL] {
         var seen = Set<String>()
         var result: [URL] = []

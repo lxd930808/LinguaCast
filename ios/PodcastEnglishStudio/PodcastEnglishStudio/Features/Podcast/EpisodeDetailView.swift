@@ -20,7 +20,7 @@ struct EpisodeDetailRouteView: View {
         if let episode = episodes.first {
             EpisodeDetailView(episode: episode, onOpenSettings: onOpenSettings)
         } else {
-            ContentUnavailableView(L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"), systemImage: "exclamationmark.triangle")
+            LinguaEmptyState(L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"), systemImage: "exclamationmark.triangle", kind: .failure)
         }
     }
 }
@@ -31,6 +31,7 @@ struct EpisodeDetailView: View {
     @Environment(\.scenePhase) var scenePhase
     @Environment(SettingsStore.self) var settings
     @Environment(PipelineRunner.self) var runner
+    @Environment(SettingsNavigation.self) var settingsNavigation
     @Query var podcastSubscriptions: [PodcastSubscription]
     let episode: EpisodeRecord
     var onOpenSettings: () -> Void = {}
@@ -41,6 +42,11 @@ struct EpisodeDetailView: View {
     @State var locatePlaybackRequest = 0
     @State var hasInitializedScroll = false
     @State var scrollPositionSequence: Int?
+    @State var transcriptScrollTask: Task<Void, Never>?
+    #if os(iOS)
+    @State var chinesePlayer = EpisodeChinesePlayback()
+    @State var showingPlaybackSettings = false
+    #endif
     @State var player = AudioPlaybackController()
     @State var segments: [LearningSegment] = []
     @State var isLoadingSegments = false
@@ -48,6 +54,11 @@ struct EpisodeDetailView: View {
     @State var isRepairingAudio = false
     @State var lastPersistedPlaybackTime: TimeInterval?
     @State var lastPersistedPlaybackAt: Date?
+    /// Cached remote-job snapshot for the cloud backend (WP14); refreshed on
+    /// appear and whenever the episode record changes (each poll updates it).
+    @State var cloudJobSnapshot: CloudRemoteJobSnapshot?
+    /// Lazily created WP11 store handle for production remote-job lookups.
+    @State var remoteJobStore: RemoteContentJobStore?
     /// True after inactive/background handling until the next user-started play restores follow.
     @State var restoreFollowOnNextPlay = false
     /// Prevents treating the initial `.active` scene phase as a lock-screen resume.
@@ -63,10 +74,42 @@ struct EpisodeDetailView: View {
         .task(id: "\(episode.id):\(episode.status):\(settings.configuration.translationTargetLanguage)") {
             lastPersistedPlaybackTime = episode.playbackPositionSeconds
             lastPersistedPlaybackAt = episode.playbackUpdatedAt
+            refreshCloudJobSnapshot()
+            // WP14 task 3: when a poll flips the episode to completed, this
+            // task re-runs (status is part of the id) and loads the freshly
+            // installed segments/audio automatically.
             guard episode.status == "completed" else { return }
             await loadSegmentsForEpisode()
             persistPlaybackDurationIfNeeded()
             await loadAudioForPlayback()
+            #if os(iOS)
+            #if DEBUG
+            if UITestSupport.isEnabled,
+               ProcessInfo.processInfo.environment["LINGUACAST_UI_REPLAY_CHINESE_SENTENCES"] == "1" {
+                // Replay sentence-boundary UI updates after initial transcript invalidation settles.
+                try? await Task.sleep(for: .milliseconds(500))
+                chinesePlayer.duration = Double(segments.last?.endMS ?? 0) / 1000
+                chinesePlayer.isSelected = true
+                for sequence in 772...777 {
+                    guard !Task.isCancelled else { return }
+                    chinesePlayer.activeSequence = sequence
+                    for tick in 0..<20 {
+                        chinesePlayer.originalTime = Double(segments.first { $0.sequence == sequence }?.startMS ?? 0) / 1000 + Double(tick) * 0.1
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                }
+                return
+            }
+            #endif
+            if !chinesePlayer.isSelected {
+                chinesePlayer.restore(episodeID: episode.id, language: settings.configuration.translationTargetLanguage,
+                    rows: segments, original: AudioPlaybackControllerBridge(title: episode.episodeTitle, time: player.currentTime, duration: player.duration,
+                        rate: player.playbackRate, isPlaying: false, pause: { player.pausePlayback() }))
+            }
+            #endif
+        }
+        .onChange(of: episode.updatedAt) { _, _ in
+            refreshCloudJobSnapshot()
         }
         .task(id: playerArtworkPrefetchToken) {
             await ArtworkPrefetchService.shared.prefetchUntilCancelled(
@@ -75,7 +118,14 @@ struct EpisodeDetailView: View {
             )
         }
         .onDisappear {
+            #if os(iOS)
+            if chinesePlayer.isSelected {
+                persistPlaybackProgress(chinesePlayer.originalTime, force: true, allowCompletion: false)
+                chinesePlayer.stop()
+            } else { persistPlaybackProgress(player.currentTime, force: true) }
+            #else
             persistPlaybackProgress(player.currentTime, force: true)
+            #endif
             if player.isPlaying {
                 player.pausePlayback()
             }

@@ -78,7 +78,7 @@ struct MobileSetupView: View {
             } else if server.isRunning {
                 ProgressView()
             } else {
-                ContentUnavailableView(L10n.string("mobile_setup.waiting_for_lan_address", fallback: "Waiting for LAN address"), systemImage: "wifi")
+                LinguaEmptyState(L10n.string("mobile_setup.waiting_for_lan_address", fallback: "Waiting for LAN address"), systemImage: "wifi", kind: .failure)
             }
 
             VStack(spacing: 8) {
@@ -242,7 +242,7 @@ private struct QRCodeView: View {
                 .interpolation(.none)
                 .scaledToFit()
         } else {
-            ContentUnavailableView(L10n.string("mobile_setup.unable_to_generate_qr_code", fallback: "Unable to generate QR code"), systemImage: "qrcode")
+            LinguaEmptyState(L10n.string("mobile_setup.unable_to_generate_qr_code", fallback: "Unable to generate QR code"), systemImage: "qrcode", kind: .failure)
         }
     }
 }

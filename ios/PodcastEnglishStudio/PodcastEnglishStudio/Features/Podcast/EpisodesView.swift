@@ -43,7 +43,7 @@ struct ProgramsView: View {
                 case .podcast:
                     PodcastProgramsSection(selectedTab: $selectedTab)
                 case .youtube:
-                    YouTubeProgramsSection()
+                    YouTubeProgramsSection(selectedTab: $selectedTab)
                 }
             }
             .padding(.horizontal, LinguaTheme.pageHorizontalPadding)
@@ -78,7 +78,7 @@ private struct PodcastProgramRouteView: View {
         if let subscription = subscriptions.first {
             PodcastProgramDetailView(subscription: subscription, selectedTab: $selectedTab)
         } else {
-            ContentUnavailableView(L10n.string("episodes.the_program_does_not_exist", fallback: "The program does not exist"), systemImage: "dot.radiowaves.left.and.right")
+            LinguaEmptyState(L10n.string("episodes.the_program_does_not_exist", fallback: "The program does not exist"), systemImage: "dot.radiowaves.left.and.right", kind: .failure)
         }
     }
 }
@@ -96,7 +96,7 @@ private struct YTChannelRouteView: View {
         if let channel = channels.first {
             YTChannelDetailView(channel: channel)
         } else {
-            ContentUnavailableView(L10n.string("common.channel_does_not_exist", fallback: "Channel does not exist"), systemImage: "play.rectangle")
+            LinguaEmptyState(L10n.string("common.channel_does_not_exist", fallback: "Channel does not exist"), systemImage: "play.rectangle", kind: .failure)
         }
     }
 }
@@ -133,7 +133,13 @@ private struct PodcastProgramsSection: View {
             LinguaSectionHeader(title: L10n.string("common.podcast", fallback: "Podcast"))
             if subscriptions.isEmpty {
                 LinguaCard {
-                    ContentUnavailableView(L10n.string("common.no_podcast_subscriptions_yet", fallback: "No Podcast subscriptions yet"), systemImage: "dot.radiowaves.left.and.right")
+                    ActionableEmptyStateView(
+                        title: L10n.string("common.no_podcast_subscriptions_yet", fallback: "No Podcast subscriptions yet"),
+                        systemImage: "dot.radiowaves.left.and.right",
+                        message: L10n.string("today.open_a_channel_on_programs_to_refresh", fallback: "After adding a subscription, open its channel on the Programs page to refresh available episodes or videos."),
+                        primaryTitle: L10n.string("common.add_subscription", fallback: "Add subscription"),
+                        primarySystemImage: "plus", primaryAction: { selectedTab = .subscriptions }
+                    )
                 }
             } else {
                 #if os(tvOS)
@@ -157,6 +163,7 @@ private struct PodcastProgramsSection: View {
                     .padding(.vertical, 20)
                 }
                 .scrollClipDisabled()
+                .focusSection()
                 .programCardButtonStyle()
                 #else
                 LazyVGrid(columns: programColumns, spacing: 16) {
@@ -206,7 +213,7 @@ private struct PodcastProgramsSection: View {
     }
 
     private func count(for subscription: PodcastSubscription) -> Int {
-        episodes.filter { $0.subscriptionID == subscription.id }.count
+        episodes.filter { $0.subscriptionID == subscription.id && $0.appearsInSubscriptionLibrary }.count
     }
 
     private var programColumns: [GridItem] {
@@ -219,6 +226,7 @@ private struct PodcastProgramsSection: View {
 }
 
 private struct YouTubeProgramsSection: View {
+    @Binding var selectedTab: AppTab
     @Environment(SettingsStore.self) private var settings
     @Query(sort: \YTChannelRecord.updatedAt, order: .reverse) private var channels: [YTChannelRecord]
     @Query(sort: \YTVideoRecord.recordUpdatedAt, order: .reverse) private var videos: [YTVideoRecord]
@@ -229,7 +237,13 @@ private struct YouTubeProgramsSection: View {
             LinguaSectionHeader(title: L10n.string("common.youtube", fallback: "YouTube"))
             if channels.isEmpty {
                 LinguaCard {
-                    ContentUnavailableView(L10n.string("common.there_is_no_youtube_channel_yet", fallback: "There is no YouTube channel yet"), systemImage: "play.rectangle")
+                    ActionableEmptyStateView(
+                        title: L10n.string("common.there_is_no_youtube_channel_yet", fallback: "There is no YouTube channel yet"),
+                        systemImage: "play.rectangle",
+                        message: L10n.string("today.open_a_channel_on_programs_to_refresh", fallback: "After adding a subscription, open its channel on the Programs page to refresh available episodes or videos."),
+                        primaryTitle: L10n.string("common.add_subscription", fallback: "Add subscription"),
+                        primarySystemImage: "plus", primaryAction: { selectedTab = .subscriptions }
+                    )
                 }
             } else {
                 #if os(tvOS)
@@ -251,6 +265,7 @@ private struct YouTubeProgramsSection: View {
                     .padding(.vertical, 20)
                 }
                 .scrollClipDisabled()
+                .focusSection()
                 .programCardButtonStyle()
                 #else
                 LazyVGrid(columns: programColumns, spacing: 16) {
@@ -444,8 +459,10 @@ struct PodcastProgramDetailView: View {
                     .accessibilityIdentifier("podcast.refresh-error")
             }
 
-            if episodes.isEmpty {
-                ContentUnavailableView(L10n.string("episodes.no_single_episode_yet", fallback: "No single episode yet"), systemImage: "headphones", description: Text(emptyDescription))
+            if episodes.isEmpty && (isRefreshing || isLoadingAll) {
+                EmptyView()
+            } else if episodes.isEmpty {
+                LinguaEmptyState(L10n.string("episodes.no_single_episode_yet", fallback: "No single episode yet"), systemImage: "headphones", description: Text(emptyDescription))
                     .frame(maxWidth: .infinity, minHeight: 320)
             } else {
                 LazyVStack(alignment: .leading, spacing: 12) {
@@ -491,6 +508,7 @@ struct PodcastProgramDetailView: View {
                             .padding(.vertical, 20)
                         }
                         .scrollClipDisabled()
+                        .focusSection()
                         #else
                         ForEach(selectedPlaybackEpisodes) { episode in
                             episodeButton(episode)
@@ -559,7 +577,7 @@ struct PodcastProgramDetailView: View {
                         }
                 }
             } else {
-                ContentUnavailableView(L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"), systemImage: "exclamationmark.triangle")
+                LinguaEmptyState(L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"), systemImage: "exclamationmark.triangle", kind: .failure)
             }
         }
     }
@@ -642,7 +660,8 @@ struct PodcastProgramDetailView: View {
 
     private var visibleEpisodes: [EpisodeRecord] {
         episodes.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.episodeTitle, channel: $0.showTitle)
+            $0.appearsInSubscriptionLibrary &&
+                !contentFilter.isFilteredOut(id: $0.id, title: $0.episodeTitle, channel: $0.showTitle)
         }
     }
 
@@ -850,12 +869,7 @@ private struct PodcastEpisodeRow: View {
                 HStack {
                     Label(statusLabel, systemImage: statusIcon)
                     if episode.status == "running" {
-                        Text(
-                            ASRProgressText.display(
-                                message: episode.pipelineMessage,
-                                fallback: stepLabel
-                            )
-                        )
+                        PodcastGenerationProgressView(episode: episode, showsBar: false)
                     }
                     if let error = episode.errorMessage {
                         Text(error)
@@ -865,10 +879,9 @@ private struct PodcastEpisodeRow: View {
                 .font(.caption)
                 .foregroundStyle(statusColor)
                 if episode.status == "running" {
-                    PodcastPipelineStageRail(step: episode.pipelineStep)
+                    LinguaProgressBar(value: episode.pipelineProgress ?? 0)
                 } else if let playbackProgressValue {
-                    ProgressView(value: playbackProgressValue)
-                        .progressViewStyle(.linear)
+                    LinguaProgressBar(value: playbackProgressValue)
                         .environment(\.layoutDirection, .leftToRight)
                         .accessibilityIdentifier("media.playback-progress")
                         .accessibilityValue(Text(verbatim: "ltr"))
@@ -965,16 +978,21 @@ private struct PodcastEpisodeRow: View {
     }
 }
 
-private struct PodcastPipelineStageRail: View {
+struct PodcastPipelineStageRail: View {
     let step: String
 
     private var currentStage: Int {
         switch step {
-        case "download", "oss_upload": 0
-        case "transcribe": 1
-        case "translate": 2
-        case "build_learning_pack", "completed": 3
-        default: 0
+        case "download", "oss_upload", "cloud_validate", "cloud_prepare", "cloud_processing":
+            0
+        case "transcribe", "segment_source":
+            1
+        case "translate":
+            2
+        case "build_learning_pack", "refine_subtitles", "package", "completed":
+            3
+        default:
+            0
         }
     }
 

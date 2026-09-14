@@ -138,6 +138,9 @@ struct DualSubtitleOverlay: View {
     }
 
     private func loadSubtitles(key: String, configuration: AppConfiguration) async {
+        // WP14 task 10: fake cloud scenarios never touch the network; the
+        // fixture records drive the generating/failed presentation.
+        if UITestSupport.isEnabled, UITestSupport.scenario.usesFakeCloudState { return }
         if loadingSubtitleKeys.contains(key) { return }
         if loadedSubtitleKey == key, !subtitleState.segments.isEmpty {
             return
@@ -173,7 +176,9 @@ struct DualSubtitleOverlay: View {
             guard AsyncOperationErrorPresentationPolicy.shouldPresent(error) else { return }
             print("DualSubtitleOverlay: subtitle load failed for \(video.id): \(error.localizedDescription)")
             if settings.configuration.translationTarget == configuration.translationTarget {
-                subtitleState.errorMessage = error.localizedDescription
+                // WP14: cloud failures carry a stable [CODE]; localize at display time.
+                subtitleState.errorMessage = CloudErrorMessagePresenter.display(error.localizedDescription)
+                    ?? error.localizedDescription
                 subtitleState.cloudCheckRequired = error is CloudSubtitleLookupError
                 subtitleState.canGenerateFromAudio = YTLocalService.canGenerateFromAudio(after: error)
             }
@@ -318,7 +323,7 @@ struct YTSubtitleDisplayView: View {
                         }
                     } else if isPreparing {
                         if let preparingProgress {
-                            ProgressView(value: min(max(preparingProgress, 0), 1))
+                            LinguaProgressBar(value: min(max(preparingProgress, 0), 1))
                                 .tint(.white)
                                 .frame(maxWidth: 220)
                         } else {
@@ -403,54 +408,5 @@ private extension String {
     var nilIfEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-enum YTSourceGenerationProgressText {
-    static func title(
-        step: String?,
-        progress: Double?,
-        downloadProgress: Double? = nil,
-        bytesPerSecond: Double? = nil
-    ) -> String? {
-        guard let step, !step.isEmpty else { return nil }
-        let base: String
-        switch step {
-        case "resolving":
-            base = L10n.string("ytvideo_player.asr_resolving_audio", fallback: "Resolving audio stream")
-        case "downloading":
-            base = L10n.string("pipeline.step.download", fallback: "Downloading Audio")
-        case "uploading":
-            base = L10n.string("pipeline.step.upload", fallback: "Uploading Audio")
-        case "transcribing":
-            base = L10n.string("pipeline.step.transcribe", fallback: "Transcribing Audio")
-        case "segmenting":
-            base = L10n.string("pipeline.step.segment_source", fallback: "Optimizing Subtitle Breaks")
-        case "translating":
-            base = L10n.string("pipeline.step.translate", fallback: "Translating Subtitles")
-        default:
-            base = L10n.string("pipeline.step.preparing", fallback: "Preparing")
-        }
-        let displayedProgress = step == "downloading" ? downloadProgress : progress
-        var components = [base]
-        if let displayedProgress, displayedProgress >= 0, displayedProgress < 1 {
-            let percent = Int((displayedProgress * 100).rounded())
-            components.append("\(percent)%")
-        }
-        if step == "downloading", let bytesPerSecond, bytesPerSecond > 0 {
-            components.append(YTDownloadSpeedText.string(bytesPerSecond: bytesPerSecond))
-        }
-        return components.joined(separator: " · ")
-    }
-}
-
-private enum YTDownloadSpeedText {
-    static func string(bytesPerSecond: Double) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        formatter.includesUnit = true
-        formatter.isAdaptive = true
-        return "\(formatter.string(fromByteCount: Int64(bytesPerSecond)))/s"
     }
 }

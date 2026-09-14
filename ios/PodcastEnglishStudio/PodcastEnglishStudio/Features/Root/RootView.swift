@@ -8,6 +8,9 @@ enum AppTab: Hashable {
     case home
     case programs
     case subscriptions
+    #if os(iOS)
+    case assistant
+    #endif
     case settings
 }
 
@@ -18,6 +21,7 @@ struct RootView: View {
     @Environment(CloudSyncCoordinator.self) private var cloudSync
     @Environment(PlaybackCatalogRecoveryCoordinator.self) private var catalogRecovery
     @Environment(PipelineRunner.self) private var runner
+    @Environment(SettingsNavigation.self) private var settingsNavigation
     @State private var selectedTab: AppTab
     @State private var youtubeService = YTLocalService()
     @State private var isBootstrappingCatalogs = false
@@ -43,10 +47,15 @@ struct RootView: View {
             if UITestSupport.isEnabled {
                 UITestSupport.installFixtures(in: modelContext)
                 runner.reconcileCompletions(context: modelContext)
-                runner.resumeOrphanedPipelines(
-                    context: modelContext,
-                    configuration: settings.configuration
-                )
+                // Fake cloud scenarios (WP14) pin static fixture states; the
+                // orphan resumer would re-schedule them against the blocked
+                // network and overwrite the fixture.
+                if !UITestSupport.scenario.usesFakeCloudState && UITestSupport.scenario != .podcastRunning {
+                    runner.resumeOrphanedPipelines(
+                        context: modelContext,
+                        configuration: settings.configuration
+                    )
+                }
                 runner.resumePendingDisplayRefinements(
                     context: modelContext,
                     configuration: settings.configuration
@@ -61,6 +70,12 @@ struct RootView: View {
                     context: modelContext,
                     configuration: settings.configuration
                 )
+                // WP14 lifecycle: explicit launch reconcile of remote content
+                // jobs (adopt jobs submitted before the last quit).
+                await runner.reconcileRemoteJobs(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
                 cloudSync.start(context: modelContext, settings: settings)
                 // App finished launching: synchronize and recover the continue-playing catalog.
                 await catalogRecovery.synchronizeAndRecover(trigger: .automatic)
@@ -68,7 +83,15 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active, !UITestSupport.isEnabled else { return }
+            guard !UITestSupport.isEnabled else { return }
+            // WP14 lifecycle: entering the background stops the high-frequency
+            // cloud polling loops; the remote records persist, and returning
+            // to the foreground re-attaches via reconcile.
+            if phase == .background {
+                stopHighFrequencyCloudPolling()
+                return
+            }
+            guard phase == .active else { return }
             runner.reconcileCompletions(context: modelContext)
             runner.resumeOrphanedPipelines(
                 context: modelContext,
@@ -80,9 +103,38 @@ struct RootView: View {
             )
             // Returning to the foreground reuses the in-flight recovery task (deduplicated).
             Task {
+                // WP14 lifecycle: foreground reconcile of remote content jobs.
+                await runner.reconcileRemoteJobs(
+                    context: modelContext,
+                    configuration: settings.configuration
+                )
                 await catalogRecovery.synchronizeAndRecover(trigger: .automatic)
                 await bootstrapMissingCatalogs()
             }
+        }
+        .onChange(of: settingsNavigation.pendingDestination) { _, destination in
+            if destination != nil {
+                selectedTab = .settings
+            }
+        }
+        .onChange(of: selectedTab) { oldTab, newTab in
+            if oldTab == .settings && newTab != .settings {
+                settingsNavigation.resetPathOnLeavingSettings()
+            }
+        }
+    }
+
+    /// Stops cloud polling before suspension: in cloud mode every `running`
+    /// episode task is a remote-job observation loop (the local pipeline only
+    /// runs in local mode), so cancelling it is safe; the next foreground
+    /// reconcile resumes from the persisted remote record.
+    private func stopHighFrequencyCloudPolling() {
+        guard settings.configuration.generationBackendMode == .cloud else { return }
+        let running = (try? modelContext.fetch(FetchDescriptor<EpisodeRecord>(
+            predicate: #Predicate { $0.status == "running" }
+        ))) ?? []
+        for episode in running {
+            runner.cancel(episodeID: episode.id)
         }
     }
 
@@ -144,6 +196,25 @@ struct RootView: View {
             }
             .tag(AppTab.subscriptions)
 
+            #if os(iOS)
+            NavigationStack {
+                AssistantHomeView()
+            }
+            .tabItem {
+                Label(L10n.string("navigation.assistant", fallback: "Assistant"), systemImage: "sparkles")
+                    .accessibilityIdentifier("tab.assistant")
+            }
+            .tag(AppTab.assistant)
+            #endif
+
+            #if os(tvOS)
+            SettingsView()
+                .tabItem {
+                    Label(L10n.string("navigation.settings", fallback: "Settings"), systemImage: "gearshape")
+                        .accessibilityIdentifier("tab.settings")
+                }
+                .tag(AppTab.settings)
+            #else
             NavigationStack {
                 SettingsView()
             }
@@ -152,6 +223,7 @@ struct RootView: View {
                     .accessibilityIdentifier("tab.settings")
             }
             .tag(AppTab.settings)
+            #endif
         }
         #if os(iOS)
         .toolbarBackground(.visible, for: .tabBar)
@@ -166,6 +238,7 @@ struct RootView: View {
         .environment(PipelineRunner())
         .environment(CloudSyncCoordinator.shared)
         .environment(PlaybackCatalogRecoveryCoordinator(cloudSync: .shared) { nil })
+        .environment(SettingsNavigation())
 }
 
 struct ConfigurationReadiness {
@@ -226,8 +299,7 @@ struct SetupChecklistView: View {
                 }
             }
 
-            ProgressView(value: readiness.progress)
-                .progressViewStyle(.linear)
+            LinguaProgressBar(value: readiness.progress)
 
             VStack(alignment: .leading, spacing: 8) {
                 configurationRow(title: L10n.string("settings.youtube_data_api_key", fallback: "YouTube Data API Key"), requirement: .youtubeAPIKey)
@@ -269,16 +341,7 @@ struct ActionableEmptyStateView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.headline)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+            LinguaEmptyState(title, systemImage: systemImage, description: Text(message), kind: .guidance)
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {

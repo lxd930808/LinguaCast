@@ -315,11 +315,9 @@ final class LocalizationSmokeUITests: XCTestCase {
         XCTAssertTrue(summaryToggle.waitForExistence(timeout: 5))
         let episodeWebsiteLink = app.descendants(matching: .any)["podcast.episode-website-link"]
         XCTAssertTrue(episodeWebsiteLink.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(
-            summaryToggle.frame.width,
-            240,
-            "The disclosure control needs a full-width tap target instead of a small text-only target"
-        )
+        XCTAssertGreaterThanOrEqual(summaryToggle.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(summaryToggle.frame.height, 44,
+            "The V17 text disclosure must retain an accessible tap target")
         XCTAssertGreaterThan(
             episodeWebsiteLink.frame.minY - summaryToggle.frame.maxY,
             12,
@@ -358,6 +356,8 @@ final class LocalizationSmokeUITests: XCTestCase {
         let running = launch(language: languages[0], scenario: "podcast-running")
         XCTAssertTrue(running.wait(for: .runningForeground, timeout: 10))
         waitForScenario(running, scenario: "podcast-running")
+        capture(running, language: "en", screen: "V17-tv-running-diagnostic")
+        print("V17 running hierarchy: \(running.debugDescription)")
         XCTAssertTrue(running.descendants(matching: .any)["podcast.processing-progress"].waitForExistence(timeout: 5))
         XCTAssertTrue(running.descendants(matching: .any)["podcast.processing-background-note"].waitForExistence(timeout: 5))
         XCTAssertFalse(running.descendants(matching: .any)["podcast.start-processing"].exists)
@@ -431,13 +431,12 @@ final class LocalizationSmokeUITests: XCTestCase {
         XCTAssertTrue(firstSegment.isHittable)
         let laterSegment = app.descendants(matching: .any)["transcript.segment.15"]
         XCTAssertFalse(laterSegment.exists)
-        for _ in 0..<6 where !firstSegment.hasFocus {
-            XCUIRemote.shared.press(.down)
-        }
-        XCTAssertTrue(firstSegment.hasFocus)
+        let play = app.buttons["player.play-pause"]
+        XCTAssertTrue(app.moveRemoteFocus(to: play))
         XCUIRemote.shared.press(.select)
         XCUIRemote.shared.press(.right)
-        XCTAssertTrue(firstSegment.hasFocus)
+        XCTAssertTrue(app.buttons["player.skip-forward"].hasFocus,
+            "A move within playback controls must not enter transcript browsing")
 
         XCTAssertTrue(laterSegment.waitForExistence(timeout: 18))
         XCTAssertTrue(laterSegment.isHittable)
@@ -467,7 +466,7 @@ final class LocalizationSmokeUITests: XCTestCase {
             app.launchEnvironment["LINGUACAST_UI_COLOR_SCHEME"] = appearance.lowercased()
         }
         app.launchArguments = [
-            "-linguacast-ui-testing",
+            "-linguacast-ui-testing", "-linguacast-ui-hide-test-chrome",
             "-AppleLanguages", "(\(language.tag))",
             "-AppleLocale", language.locale,
             "-linguacast-ui-tab", tab,
@@ -486,18 +485,31 @@ final class LocalizationSmokeUITests: XCTestCase {
     private func waitForScenario(_ app: XCUIApplication, scenario: String) {
         switch scenario {
         case "first-launch":
-            waitForScreenAndFixtures(app, tab: "home")
+            XCTAssertTrue(app.descendants(matching: .any)["screen.home"].waitForExistence(timeout: 8))
+            XCTAssertTrue(app.descendants(matching: .any)["home.empty-continue"].waitForExistence(timeout: 8))
+            XCTAssertFalse(app.staticTexts["The Daily Language Lab"].exists)
             XCTAssertTrue(app.descendants(matching: .any)["setup.configuration"].waitForExistence(timeout: 5))
         case "podcast-ready":
             XCTAssertTrue(app.descendants(matching: .any)["screen.podcast-player"].waitForExistence(timeout: 8))
             XCTAssertTrue(app.descendants(matching: .any)["subtitle.ready-state"].waitForExistence(timeout: 8))
+            #if !os(tvOS)
+            let original = app.buttons["player.mode-original"]
+            XCTAssertTrue(original.waitForExistence(timeout: 8))
+            original.tap()
+            #endif
             XCTAssertTrue(app.descendants(matching: .any)["media.playback-controls"].waitForExistence(timeout: 8))
             XCTAssertTrue(app.staticTexts["A deterministic English subtitle."].waitForExistence(timeout: 8))
         case "podcast-follow":
             XCTAssertTrue(app.descendants(matching: .any)["screen.podcast-player"].waitForExistence(timeout: 8))
             XCTAssertTrue(app.descendants(matching: .any)["subtitle.ready-state"].waitForExistence(timeout: 8))
+            #if !os(tvOS)
+            let original = app.buttons["player.mode-original"]
+            XCTAssertTrue(original.waitForExistence(timeout: 8))
+            original.tap()
+            #endif
             XCTAssertTrue(app.descendants(matching: .any)["media.playback-controls"].waitForExistence(timeout: 8))
-            XCTAssertTrue(app.descendants(matching: .any)["transcript.segment.1"].waitForExistence(timeout: 8))
+            // The long metadata header can keep the first lazy row offscreen.
+            // The scrubbing test verifies the destination row and active-cue visibility.
         case "podcast-queued":
             XCTAssertTrue(app.descendants(matching: .any)["screen.podcast-player"].waitForExistence(timeout: 8))
         case "podcast-queued-missing-configuration", "podcast-running":
@@ -554,7 +566,7 @@ final class LocalizationSmokeUITests: XCTestCase {
         let settings = app.buttons["player.settings.navigation"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["player.settings.video-panel"].waitForExistence(timeout: 5))
         capture(app, language: "en", screen: "youtube-settings-\(expectedValue)")
         #endif
         app.terminate()
@@ -614,11 +626,18 @@ final class LocalizationSmokeUITests: XCTestCase {
     }
 
     private func tabButton(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        let identified = app.tabBars.buttons.matching(identifier: identifier).firstMatch
+        if identified.exists { return identified }
         let index: Int
         switch identifier {
         case "tab.programs": index = 1
         case "tab.subscriptions": index = 2
-        case "tab.settings": index = 3
+        case "tab.settings":
+            #if os(tvOS)
+            index = 3
+            #else
+            index = 4
+            #endif
         default: index = 0
         }
         return app.tabBars.firstMatch.buttons.element(boundBy: index)

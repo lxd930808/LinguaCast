@@ -75,6 +75,10 @@ public final class YTVideoRecord {
     public var actualPlaybackCodec: String?
     public var createdAt: Date
     public var recordUpdatedAt: Date
+    /// `subscription` (default / nil) or `assistant`. Optional so SwiftData can
+    /// lightweight-migrate existing rows.
+    public var originRaw: String?
+    public var pinnedToHome: Bool = false
 
     public init(
         id: String,
@@ -85,7 +89,9 @@ public final class YTVideoRecord {
         updatedAt: Date? = nil,
         url: String,
         thumbnail: String? = nil,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        originRaw: String? = nil,
+        pinnedToHome: Bool = false
     ) {
         self.id = id
         self.channelRecordID = channelRecordID
@@ -107,6 +113,21 @@ public final class YTVideoRecord {
         self.actualPlaybackCodec = nil
         self.createdAt = createdAt
         self.recordUpdatedAt = createdAt
+        self.originRaw = originRaw
+        self.pinnedToHome = pinnedToHome
+    }
+
+    public var catalogOrigin: CatalogOrigin {
+        get { CatalogOrigin(stored: originRaw) }
+        set { originRaw = newValue.storedValue }
+    }
+
+    public var appearsInSubscriptionLibrary: Bool {
+        CatalogIsolationPolicy.appearsInSubscriptionLibrary(originRaw: originRaw)
+    }
+
+    public var isPinnedAssistantHomeItem: Bool {
+        CatalogIsolationPolicy.isPinnedAssistantHomeItem(originRaw: originRaw, pinnedToHome: pinnedToHome)
     }
 
     public var enReady: Bool {

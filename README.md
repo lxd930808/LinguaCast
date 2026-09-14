@@ -11,6 +11,8 @@ LinguaCast is a source-reference iOS and tvOS app for bilingual podcast and YouT
 - A SwiftUI app targeting iOS 17+ and tvOS 17+
 - Shared Swift packages for domain models, playback, and optional CloudKit sync
 - Podcast and YouTube subscription, catalog, playback, subtitle, and learning flows
+- On-device Chinese speech synthesis (optional, with separately provisioned model assets)
+- Optional content-generation and research-assistant clients using your own endpoints
 - On-device Keychain-backed API configuration
 - A short-lived local-network QR setup flow for non-secret Apple TV settings
 - An optional Node.js 24 + yt-dlp media service with MP4/HLS preparation and Docker support
@@ -30,6 +32,7 @@ The snapshot intentionally excludes private server infrastructure, deployment cr
 ```text
 Packages/
   CloudSyncKit/       Optional CloudKit synchronization and app settings
+  ChineseTTS/         Chinese speech planning, synthesis, and local audio storage
   DomainModels/       Shared SwiftData models
   PlayerKit/          Audio playback layer
 ios/PodcastEnglishStudio/
@@ -134,3 +137,7 @@ YouTube, Apple, CloudKit, and third-party provider names are trademarks of their
 ## License
 
 MIT © 2026 lxd930808. See [LICENSE](LICENSE).
+
+## Snapshot update
+
+This snapshot includes the V17 interface refresh, cloud playback and translation recovery updates, research-assistant client flows, and optional Chinese speech synthesis from the local source revision `6fc2bab`. Private deployment infrastructure, original development history, and model weights are excluded. Content and assistant endpoints use `example.com` placeholders; configure your own services before enabling these features. See [ChineseTTS](Packages/ChineseTTS/README.md) for model provisioning details.

@@ -18,22 +18,32 @@ struct HomeView: View {
 
     private var continueItems: [HomeContentItem] {
         let podcastItems = episodes
-            .filter { playbackCategory(for: $0) == .inProgress }
+            .filter { $0.appearsInSubscriptionLibrary && playbackCategory(for: $0) == .inProgress }
             .map(HomeContentItem.podcast)
         let videoItems = videos
-            .filter { playbackCategory(for: $0) == .inProgress }
+            .filter { $0.appearsInSubscriptionLibrary && playbackCategory(for: $0) == .inProgress }
             .map(HomeContentItem.youtube)
         return (podcastItems + videoItems).sorted { $0.sortDate > $1.sortDate }
     }
 
     private var recentItems: [HomeContentItem] {
         let podcastItems = episodes
-            .filter { playbackCategory(for: $0) == .unplayed }
+            .filter { $0.appearsInSubscriptionLibrary && playbackCategory(for: $0) == .unplayed }
             .map(HomeContentItem.podcast)
         let videoItems = videos
-            .filter { playbackCategory(for: $0) == .unplayed }
+            .filter { $0.appearsInSubscriptionLibrary && playbackCategory(for: $0) == .unplayed }
             .map(HomeContentItem.youtube)
         return (podcastItems + videoItems).sorted { $0.publishOrCreateDate > $1.publishOrCreateDate }
+    }
+
+    private var assistantHomeItems: [HomeContentItem] {
+        let podcastItems = episodes
+            .filter(\.isPinnedAssistantHomeItem)
+            .map(HomeContentItem.podcast)
+        let videoItems = videos
+            .filter(\.isPinnedAssistantHomeItem)
+            .map(HomeContentItem.youtube)
+        return (podcastItems + videoItems).sorted { $0.sortDate > $1.sortDate }
     }
 
     var body: some View {
@@ -63,8 +73,9 @@ struct HomeView: View {
 
     private var homePrefetchToken: String {
         let continueIDs = continueItems.map(\.id).joined(separator: ",")
+        let assistantIDs = assistantHomeItems.map(\.id).joined(separator: ",")
         let readyIDs = readyCatalogItems.map(\.id).joined(separator: ",")
-        return "home:\(continueIDs)|\(readyIDs)"
+        return "home:\(continueIDs)|\(assistantIDs)|\(readyIDs)"
     }
 
     private var homePrefetchURLs: [URL] {
@@ -80,10 +91,10 @@ struct HomeView: View {
 
     private var readyCatalogItems: [HomeContentItem] {
         let podcastItems = episodes
-            .filter { $0.status == "completed" }
+            .filter { $0.appearsInSubscriptionLibrary && $0.status == "completed" }
             .map(HomeContentItem.podcast)
         let videoItems = videos
-            .filter(\.bilingualSubtitlesCompleted)
+            .filter { $0.appearsInSubscriptionLibrary && $0.bilingualSubtitlesCompleted }
             .map(HomeContentItem.youtube)
         return (podcastItems + videoItems).sorted { $0.publishOrCreateDate > $1.publishOrCreateDate }
     }
@@ -109,6 +120,15 @@ struct HomeView: View {
                 } else {
                     navigationRow(for: continueItems[0], showsProgress: true, isHero: true)
                     ForEach(continueItems.dropFirst().prefix(3)) { item in
+                        navigationRow(for: item, showsProgress: true)
+                    }
+                }
+
+                if !assistantHomeItems.isEmpty {
+                    LinguaSectionHeader(
+                        title: L10n.string("home.assistant_section", fallback: "From Assistant")
+                    )
+                    ForEach(assistantHomeItems.prefix(8)) { item in
                         navigationRow(for: item, showsProgress: true)
                     }
                 }
@@ -171,6 +191,22 @@ struct HomeView: View {
                     }
                 }
 
+                if !assistantHomeItems.isEmpty {
+                    LinguaSectionHeader(
+                        title: L10n.string("home.assistant_section", fallback: "From Assistant")
+                    )
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 22) {
+                            ForEach(assistantHomeItems.prefix(12)) { item in
+                                navigationRow(for: item, showsProgress: true)
+                                    .frame(width: 390)
+                            }
+                        }
+                        .padding(.vertical, 20)
+                    }
+                    .scrollClipDisabled()
+                }
+
                 LinguaSectionHeader(
                     title: L10n.string("today.latest_updates", fallback: "Latest updates")
                 )
@@ -228,6 +264,8 @@ struct HomeView: View {
                 secondaryAction: { selectedTab = .settings }
             )
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.empty-continue")
     }
 
     private func emptyRecentCard(readiness: ConfigurationReadiness) -> some View {
@@ -244,6 +282,8 @@ struct HomeView: View {
                 secondaryAction: readiness.summary.isComplete ? nil : { selectedTab = .settings }
             )
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.empty-recent")
     }
 
     @ViewBuilder

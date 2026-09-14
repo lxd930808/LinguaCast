@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Missing or invalid bearer token",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {}
+  }
+}

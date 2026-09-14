@@ -1,0 +1,25 @@
+{
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "title": "Forward compatible session",
+  "phase": "awaiting_operator",
+  "outputLanguage": "zh-Hans",
+  "storefront": "US",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "createdAt": "2026-08-31T01:00:00Z",
+  "updatedAt": "2026-08-31T01:00:00Z",
+  "messages": [],
+  "report": null,
+  "searchResults": [],
+  "binding": null,
+  "activeTurn": {
+    "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+    "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "kind": "research",
+    "status": "waiting_quota",
+    "eventsURL": "/v1/assistant/turns/at_01ARZ3NDEKTSV4RRFFQ69G5FB0/events",
+    "createdAt": "2026-08-31T01:00:01Z",
+    "startedAt": null,
+    "finishedAt": null
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "id": "1",
+      "event": "session.title_updated",
+      "data": {
+        "schemaVersion": 1,
+        "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "sequence": 1,
+        "occurredAt": "2026-08-31T01:00:01Z",
+        "payload": { "title": "英文慢速新闻" }
+      }
+    }
+  ]
+}

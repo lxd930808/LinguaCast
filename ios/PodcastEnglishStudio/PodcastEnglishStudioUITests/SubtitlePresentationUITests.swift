@@ -22,7 +22,9 @@ final class SubtitlePresentationUITests: XCTestCase {
 
         scrollUntilExists(app.descendants(matching: .any)["settings.subtitle.english-size"], in: app)
         XCTAssertTrue(app.descendants(matching: .any)["settings.subtitle.english-size"].exists)
+        scrollUntilExists(app.descendants(matching: .any)["settings.subtitle.target-scale"], in: app)
         XCTAssertTrue(app.descendants(matching: .any)["settings.subtitle.target-scale"].exists)
+        scrollUntilExists(app.descendants(matching: .any)["settings.subtitle.order"], in: app)
         XCTAssertTrue(app.descendants(matching: .any)["settings.subtitle.order"].exists)
 
         scrollUntilExists(app.staticTexts[previewEnglish], in: app)
@@ -233,6 +235,17 @@ final class SubtitlePresentationUITests: XCTestCase {
         )
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 10))
         XCTAssertTrue(settings.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 8))
+        #if os(tvOS)
+        let subtitlesRow = settings.descendants(matching: .any)["settings.row.subtitles"]
+        if !subtitlesRow.exists {
+            for _ in 0..<10 { XCUIRemote.shared.press(.down) }
+        }
+        XCTAssertTrue(subtitlesRow.waitForExistence(timeout: 5))
+        for _ in 0..<10 where !subtitlesRow.hasFocus {
+            XCUIRemote.shared.press(.down)
+        }
+        XCUIRemote.shared.press(.select)
+        #endif
         let englishSize = settings.descendants(matching: .any)["settings.subtitle.english-size"]
         if !englishSize.exists {
             for _ in 0..<8 { XCUIRemote.shared.press(.down) }

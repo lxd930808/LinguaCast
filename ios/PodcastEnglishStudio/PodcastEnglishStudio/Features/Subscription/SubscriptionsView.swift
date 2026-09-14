@@ -61,8 +61,10 @@ struct SubscriptionsView: View {
                 HStack(alignment: .top, spacing: 28) {
                     selectedSubscriptionSection
                         .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .focusSection()
                     tvOSActions
                         .frame(width: 560)
+                        .focusSection()
                 }
                 #else
                 addSubscriptionButton
@@ -451,9 +453,10 @@ private struct PodcastSubscriptionsSection: View {
             )
             if subscriptions.isEmpty {
                 LinguaCard {
-                    ContentUnavailableView(
+                    LinguaEmptyState(
                         L10n.string("common.no_podcast_subscriptions_yet", fallback: "No Podcast subscriptions yet"),
-                        systemImage: "dot.radiowaves.left.and.right"
+                        systemImage: "dot.radiowaves.left.and.right",
+                        kind: .guidance
                     )
                 }
             } else {
@@ -484,6 +487,7 @@ private struct PodcastSubscriptionRow: View {
                 subtitle: subscription.showURL,
                 icon: "dot.radiowaves.left.and.right"
             )
+            SubscriptionEnabledStatus(isEnabled: subscription.isEnabled)
             if let error = subscription.lastError, !error.isEmpty {
                 Text(error)
                     .font(.caption)
@@ -521,9 +525,10 @@ private struct YouTubeSubscriptionsSection: View {
                 }
             } else if channels.isEmpty {
                 LinguaCard {
-                    ContentUnavailableView(
+                    LinguaEmptyState(
                         L10n.string("common.there_is_no_youtube_channel_yet", fallback: "There is no YouTube channel yet"),
-                        systemImage: "play.rectangle"
+                        systemImage: "play.rectangle",
+                        kind: .guidance
                     )
                 }
             } else {
@@ -554,6 +559,7 @@ private struct YouTubeSubscriptionRow: View {
                 subtitle: channel.url,
                 icon: "play.rectangle"
             )
+            SubscriptionEnabledStatus(isEnabled: channel.isEnabled)
             if let error = channel.lastError, !error.isEmpty {
                 Text(error)
                     .font(.caption)
@@ -594,5 +600,18 @@ private struct SubscriptionTitle: View {
                     .lineLimit(2)
             }
         }
+    }
+}
+
+private struct SubscriptionEnabledStatus: View {
+    let isEnabled: Bool
+
+    var body: some View {
+        Label(
+            isEnabled ? L10n.string("common.on", fallback: "On") : L10n.string("common.off", fallback: "Off"),
+            systemImage: isEnabled ? "checkmark.circle.fill" : "pause.circle"
+        )
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(isEnabled ? LinguaTheme.success : LinguaTheme.secondaryText)
     }
 }

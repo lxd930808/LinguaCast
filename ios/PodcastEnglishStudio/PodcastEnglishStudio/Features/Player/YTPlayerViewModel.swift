@@ -147,9 +147,14 @@ final class YTPlayerViewModel {
     var playbackItemToken = UUID()
 
     private let resolver: any YTMediaStreamResolving
+    private let cloudResolver: (any CloudVideoMediaResolving)?
+    /// Committed app configuration for cloud media lookup. Set by the player view
+    /// before `load`; signed URLs are never stored here.
+    var cloudConfiguration: AppConfiguration?
     private var resolvedStreams: YTResolvedMediaStreams?
     private var loadedVideoID: String?
     private var didRetryForbiddenOrExpired = false
+    private var didRefreshCloudURL = false
     private var autoDowngradePolicy: YTStreamSelectionPolicy?
     private var stallFallbackStage: StallFallbackStage = .primary
     private var lastNetworkKind: YTPlaybackNetworkKind?
@@ -158,8 +163,16 @@ final class YTPlayerViewModel {
     /// the caller; the stream URL's `dur` parameter is the in-Core fallback).
     private var composedHLSDurationHint: TimeInterval?
 
-    init(resolver: (any YTMediaStreamResolving)? = nil) {
+    init(
+        resolver: (any YTMediaStreamResolving)? = nil,
+        cloudResolver: (any CloudVideoMediaResolving)? = CloudVideoMediaResolver()
+    ) {
         self.resolver = resolver ?? YTPlaybackBackend.makeResolver()
+        self.cloudResolver = cloudResolver
+    }
+
+    private var isPlayingCloudMedia: Bool {
+        playbackSelection?.selectionMode == CloudVideoPlaybackRouting.selectionMode
     }
 
     func load(
@@ -185,6 +198,7 @@ final class YTPlayerViewModel {
             playbackSelection = nil
             resolvedStreams = nil
             didRetryForbiddenOrExpired = false
+            didRefreshCloudURL = false
             autoDowngradePolicy = nil
             stallFallbackStage = .primary
             actualPlaybackHeight = nil
@@ -200,6 +214,16 @@ final class YTPlayerViewModel {
         lastNetworkKind = YTPlaybackNetworkMonitor.shared.kind
 
         do {
+            let installedCloud = await installCloudIfAvailable(
+                videoID: videoID,
+                quality: quality,
+                restoreTime: initialTime ?? currentTime.wrappedValue,
+                wasPlaying: shouldResumeAfterLoad,
+                operationGeneration: operationGeneration,
+                forceRefresh: false
+            )
+            if installedCloud { return }
+
             print("YTPlayerView: resolving native stream for \(videoID)")
             let streams = try await resolveStreams(videoID: videoID, quality: quality)
             guard playbackOperationGeneration == operationGeneration else { return }
@@ -238,6 +262,9 @@ final class YTPlayerViewModel {
         let network = YTPlaybackNetworkMonitor.shared.kind
         defer { lastNetworkKind = network }
         guard let lastNetworkKind, lastNetworkKind != network else { return }
+        guard CloudVideoPlaybackRouting.shouldReapplyOnNetworkChange(
+            selectionMode: playbackSelection?.selectionMode
+        ) else { return }
         // Auto tier re-applies the cellular 1080p cap when leaving Wi‑Fi.
         let isAuto = quality == nil || quality == .highestQuality
         guard isAuto, network == .cellular, lastNetworkKind != .cellular else { return }
@@ -272,6 +299,33 @@ final class YTPlayerViewModel {
             auxiliaryAudioItem = nil
             composedHLSAsset = nil
             playbackSelection = nil
+            return
+        }
+        if isPlayingCloudMedia {
+            let decision = CloudVideoPlaybackRouting.decideOnPlayerFailure(
+                statusCode: statusCode,
+                currentSelectionMode: playbackSelection?.selectionMode,
+                didRefreshCloudURL: didRefreshCloudURL
+            )
+            if decision == .refreshCloudOnce {
+                didRefreshCloudURL = true
+                let installed = await installCloudIfAvailable(
+                    videoID: videoID,
+                    quality: quality,
+                    restoreTime: restoreTime,
+                    wasPlaying: wasPlaying,
+                    operationGeneration: operationGeneration,
+                    forceRefresh: true
+                )
+                if installed { return }
+            }
+            await installYouTubeFallback(
+                quality: quality,
+                restoreTime: restoreTime,
+                wasPlaying: wasPlaying,
+                expectedPlaybackItemToken: expectedPlaybackItemToken,
+                expectedOperationGeneration: operationGeneration
+            )
             return
         }
         let shouldReparse = (statusCode == 403 || statusCode == 410) && !didRetryForbiddenOrExpired
@@ -346,6 +400,16 @@ final class YTPlayerViewModel {
     ) async {
         guard expectedPlaybackItemToken == playbackItemToken else { return }
         let operationGeneration = playbackOperationGeneration
+        if isPlayingCloudMedia {
+            await installYouTubeFallback(
+                quality: quality,
+                restoreTime: restoreTime,
+                wasPlaying: wasPlaying,
+                expectedPlaybackItemToken: expectedPlaybackItemToken,
+                expectedOperationGeneration: operationGeneration
+            )
+            return
+        }
         guard let videoID = loadedVideoID, let streams = resolvedStreams else { return }
         if let currentSelection = playbackSelection,
            case .hls = currentSelection.source {
@@ -839,6 +903,115 @@ final class YTPlayerViewModel {
             )
         } else {
             qualityDegradedNotice = nil
+        }
+    }
+
+    private func installCloudIfAvailable(
+        videoID: String,
+        quality: YTStreamSelectionPolicy?,
+        restoreTime: TimeInterval?,
+        wasPlaying: Bool,
+        operationGeneration: UUID,
+        forceRefresh: Bool
+    ) async -> Bool {
+        guard let cloudResolver, let cloudConfiguration else { return false }
+        guard CloudVideoPlaybackRouting.shouldAttemptCloud(usesOfficialIFrame: false) else {
+            return false
+        }
+        var outcome = await cloudResolver.lookup(
+            videoID: videoID,
+            preferredHeight: CloudVideoPlaybackRouting.preferredHeight(from: quality),
+            configuration: cloudConfiguration,
+            forceRefresh: forceRefresh
+        )
+        while case .notReady(let retryAfter) = outcome {
+            qualityDegradedNotice = L10n.string("video_save.preparing", fallback: "Saving video to cloud…")
+            do { try await Task.sleep(for: .seconds(max(2, min(retryAfter ?? 8, 30)))) }
+            catch { return true }
+            guard playbackOperationGeneration == operationGeneration else { return true }
+            outcome = await cloudResolver.lookup(videoID: videoID,
+                preferredHeight: CloudVideoPlaybackRouting.preferredHeight(from: quality),
+                configuration: cloudConfiguration, forceRefresh: true)
+        }
+        if case .transport = outcome {
+            qualityDegradedNotice = L10n.string("video_save.query_failed", fallback: "Could not check cloud video. Please retry.")
+            return true
+        }
+        guard playbackOperationGeneration == operationGeneration else { return true }
+        let decision = CloudVideoPlaybackRouting.decideOnLookup(
+            outcome: outcome,
+            quality: quality,
+            expectedDuration: composedHLSDurationHint,
+            supportsAV1: YTHardwareDecodeSupport.isAV1Supported
+        )
+        switch decision {
+        case .useCloud(let candidate):
+            do {
+                try await installCloudCandidate(
+                    candidate,
+                    restoreTime: restoreTime,
+                    wasPlaying: wasPlaying,
+                    expectedOperationGeneration: operationGeneration
+                )
+                return true
+            } catch {
+                print("YTPlayerView: cloud media install failed: \(error.localizedDescription)")
+                return false
+            }
+        case .manualQualityMiss, .fallback, .refreshCloudOnce:
+            return false
+        }
+    }
+
+    private func installCloudCandidate(
+        _ candidate: CloudVideoPlaybackCandidate,
+        restoreTime: TimeInterval?,
+        wasPlaying: Bool,
+        expectedOperationGeneration: UUID
+    ) async throws {
+        let selection = CloudVideoPlaybackRouting.playbackSelection(from: candidate)
+        let playback = try await makePreparedPlayback(from: selection.source)
+        guard expectedOperationGeneration == playbackOperationGeneration else { return }
+        availableQualityTiers = CloudVideoPlaybackRouting.availableQualityTiers(height: candidate.height)
+        resolvedStreams = nil
+        install(
+            selection: selection,
+            playback: playback,
+            restoreTime: restoreTime,
+            wasPlaying: wasPlaying
+        )
+        print("YTPlayerView: installed cloud-media media=\(candidate.mediaId) height=\(candidate.height)")
+    }
+
+    private func installYouTubeFallback(
+        quality: YTStreamSelectionPolicy?,
+        restoreTime: TimeInterval?,
+        wasPlaying: Bool,
+        expectedPlaybackItemToken: UUID?,
+        expectedOperationGeneration: UUID
+    ) async {
+        guard let videoID = loadedVideoID else { return }
+        do {
+            let streams = try await resolveStreams(videoID: videoID, quality: quality)
+            guard expectedOperationGeneration == playbackOperationGeneration else { return }
+            resolvedStreams = streams
+            availableQualityTiers = YTPlaybackSourceSelector.availableQualityTiers(from: streams)
+            try await applySelection(
+                videoID: videoID,
+                streams: streams,
+                quality: quality,
+                restoreTime: restoreTime,
+                wasPlaying: wasPlaying,
+                expectedOperationGeneration: expectedOperationGeneration,
+                expectedPlaybackItemToken: expectedPlaybackItemToken
+            )
+        } catch {
+            guard expectedOperationGeneration == playbackOperationGeneration else { return }
+            nativeStreamError = error.localizedDescription
+            playerItem = nil
+            auxiliaryAudioItem = nil
+            composedHLSAsset = nil
+            playbackSelection = nil
         }
     }
 

@@ -22,12 +22,13 @@ struct YTVideoPlayerScreen: View {
                 playerSurface(viewModel)
                 platformPlayerOverlay
             }
-            .accessibilityIdentifier("screen.youtube-player")
             .background(.black)
             .ignoresSafeArea()
             .navigationTitle(L10n.string("ytvideo_player.shadowing", fallback: "Shadowing")),
             subtitleOverlay: playerSubtitleOverlay
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("screen.youtube-player")
         .alert(L10n.string("ytvideo_player.subtitles", fallback: "subtitles"), isPresented: Binding(get: { viewModel.errorMessage != nil }, set: { if !$0 { viewModel.errorMessage = nil } })) {
             Button(L10n.string("ytvideo_player.ok", fallback: "OK"), role: .cancel) { viewModel.errorMessage = nil }
         } message: {
@@ -37,6 +38,13 @@ struct YTVideoPlayerScreen: View {
             viewModel.loadPersistedPlaybackState()
             if UITestSupport.isEnabled {
                 installUITestPlaybackFixture(in: viewModel)
+            }
+        }
+        .task(id: "video-save-" + video.id) {
+            guard !UITestSupport.isEnabled else { return }
+            while !Task.isCancelled {
+                await viewModel.refreshVideoSave(configuration: settings.configuration)
+                do { try await Task.sleep(for: .seconds(8)) } catch { break }
             }
         }
         .onChange(of: viewModel.currentTime) { _, value in
@@ -84,6 +92,12 @@ struct YTVideoPlayerScreen: View {
         if UITestSupport.isEnabled {
             Color.black
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #if os(tvOS)
+            // The canned surface replaces AVPlayerViewController, which would
+            // normally hold focus; without a focus target the DPAD chrome
+            // (onMoveCommand) never receives directional presses in UI tests.
+            .focusable()
+            #endif
             .onChange(of: viewModel.playbackController.command) { _, command in
                 consumeUITestPlaybackCommand(command, in: viewModel)
             }
@@ -112,6 +126,9 @@ struct YTVideoPlayerScreen: View {
     }
 
     private func installUITestPlaybackFixture(in viewModel: YTVideoPlayerScreenViewModel) {
+        // Fake cloud scenarios (WP14) keep their generating/failed presentation;
+        // the canned playback segments would mask the cloud status UI.
+        guard !UITestSupport.scenario.usesFakeCloudState else { return }
         guard viewModel.subtitleState.segments.isEmpty else { return }
         viewModel.duration = 18
         viewModel.subtitleState.segments = UITestSupport.youtubePlaybackSegments
@@ -151,7 +168,7 @@ struct SubtitleStatusRow: View {
             }
             if let generation = generationProgressText {
                 if let generationProgressValue {
-                    ProgressView(value: min(max(generationProgressValue, 0), 1))
+                    LinguaProgressBar(value: min(max(generationProgressValue, 0), 1))
                 } else {
                     ProgressView()
                 }
@@ -159,13 +176,37 @@ struct SubtitleStatusRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if let lastError = video.lastError, !lastError.isEmpty, video.sourceGenerationStep == nil {
-                Text(lastError)
+                // WP14: cloud failures persist with a stable [CODE] suffix;
+                // present the localized form, keep the code for diagnostics.
+                Text(CloudErrorMessagePresenter.display(lastError) ?? lastError)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-            }
         }
     }
+}
+
+struct YTVideoPlayerRouteView: View {
+    @Query private var videos: [YTVideoRecord]
+    let videoID: String
+
+    init(videoID: String) {
+        self.videoID = videoID
+        _videos = Query(filter: #Predicate<YTVideoRecord> { $0.id == videoID })
+    }
+
+    var body: some View {
+        if let video = videos.first {
+            YTVideoPlayerScreen(video: video)
+        } else {
+            LinguaEmptyState(
+                L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"),
+                systemImage: "exclamationmark.triangle",
+                kind: .failure
+            )
+        }
+    }
+}
 
     private var generationProgressText: String? {
         YTSourceGenerationProgressText.title(
@@ -184,6 +225,10 @@ struct SubtitleStatusRow: View {
     }
 
     private var labelText: String {
+        if video.subtitleStatus == "generating" {
+            // WP13 cloud pipeline: avoid the local audio-ASR wording.
+            return L10n.string("ytvideo_player.cloud_generating", fallback: "Generating in the cloud")
+        }
         if video.sourceGenerationStep != nil {
             return L10n.string(
                 "ytvideo_player.generate_from_audio",
@@ -197,9 +242,9 @@ struct SubtitleStatusRow: View {
         case "running": return L10n.string("ytvideo_player.getting_english_subtitles", fallback: "Getting English subtitles")
         case "translating":
             if let progress {
-                return L10n.format("subtitles.translating_progress", fallback: "LLM subtitle translation %@/%@", String(progress.translatedCount), String(progress.totalCount))
+                return YTSourceGenerationProgressText.title(step: "translating", progress: nil, completedCount: progress.translatedCount, totalCount: progress.totalCount) ?? PipelineStepTitle.display("translate")
             }
-            return L10n.string("ytvideo_player.translating_subtitles_in_llm", fallback: "Translating subtitles in LLM")
+            return PipelineStepTitle.display("translate")
         case "failed": return L10n.string("ytvideo_player.subtitles_not_available", fallback: "Subtitles not available")
         default:
             if video.enReady { return L10n.string("ytvideo_player.the_english_subtitles_have_been_saved_and_the_translation_will_b", fallback: "The English subtitles have been saved and the translation will be tried again.") }
@@ -208,6 +253,7 @@ struct SubtitleStatusRow: View {
     }
 
     private var iconName: String {
+        if video.subtitleStatus == "generating" { return "icloud.and.arrow.up" }
         if video.sourceGenerationStep != nil { return "waveform" }
         if video.bilingualSubtitlesCompleted { return "checkmark.circle" }
         if video.enReady { return "text.quote" }
@@ -217,6 +263,9 @@ struct SubtitleStatusRow: View {
     }
 
     private var statusText: String {
+        if video.subtitleStatus == "generating" {
+            return L10n.string("ytvideo_player.cloud_generating", fallback: "Generating in the cloud")
+        }
         if video.sourceGenerationStep != nil {
             return L10n.string("ytvideo_player.fetching", fallback: "Fetching")
         }
@@ -238,5 +287,54 @@ struct SubtitleStatusRow: View {
             translatedCount: video.subtitleTranslatedCount ?? 0,
             totalCount: totalCount
         )
+    }
+}
+
+struct YTVideoPlayerRouteView: View {
+    @Query private var videos: [YTVideoRecord]
+    let videoID: String
+
+    init(videoID: String) {
+        self.videoID = videoID
+        _videos = Query(filter: #Predicate<YTVideoRecord> { $0.id == videoID })
+    }
+
+    var body: some View {
+        if let video = videos.first {
+            YTVideoPlayerScreen(video: video)
+        } else {
+            LinguaEmptyState(
+                L10n.string("common.the_single_episode_does_not_exist", fallback: "The single episode does not exist"),
+                systemImage: "exclamationmark.triangle",
+                kind: .failure
+            )
+        }
+    }
+}
+
+
+struct CloudVideoSaveRow: View {
+    let viewModel: YTVideoPlayerScreenViewModel
+    let configuration: AppConfiguration
+    var body: some View {
+        if let state = viewModel.videoSaveState {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(title(state), systemImage: state == "ready" ? "checkmark.icloud" : "icloud.and.arrow.up")
+                if let error = viewModel.videoSaveError { Text(error).font(.caption).foregroundStyle(.secondary) }
+                if state == "failed" || state == "not_saved" {
+                    Button(L10n.string("video_save.retry", fallback: "Retry saving video")) {
+                        Task { await viewModel.refreshVideoSave(configuration: configuration, retry: true) }
+                    }.disabled(viewModel.isRetryingVideoSave)
+                }
+            }.accessibilityIdentifier("player.cloud-video-save")
+        }
+    }
+    private func title(_ state: String) -> String {
+        switch state {
+        case "ready": return L10n.string("video_save.ready", fallback: "Video saved to cloud · Available on TV")
+        case "queued", "running": return L10n.string("video_save.preparing", fallback: "Saving video to cloud…")
+        case "failed": return L10n.string("video_save.failed", fallback: "Video save failed · Subtitles remain available")
+        default: return L10n.string("video_save.missing", fallback: "Video is not saved to cloud")
+        }
     }
 }

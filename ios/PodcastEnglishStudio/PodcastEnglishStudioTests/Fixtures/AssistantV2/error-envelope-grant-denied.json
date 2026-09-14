@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "WORKSPACE_GRANT_DENIED",
+    "message": "Shared alias is not granted to this research",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {
+      "alias": "secrets"
+    }
+  }
+}

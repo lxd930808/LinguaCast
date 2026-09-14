@@ -629,6 +629,7 @@ final class LearningCoreTests: XCTestCase {
         XCTAssertEqual(TranslationConcurrencyPolicy.maxConcurrentRequests(forProvider: "cerebras"), 1)
         XCTAssertEqual(TranslationConcurrencyPolicy.maxConcurrentRequests(forProvider: "dashscope"), 3)
         XCTAssertEqual(TranslationConcurrencyPolicy.maxConcurrentRequests(forProvider: "qwen"), 3)
+        XCTAssertEqual(TranslationConcurrencyPolicy.maxConcurrentRequests(forProvider: "openrouter"), 3)
     }
 
     func testTranslationMergeKeepsSequenceOrderWhenBatchResultsReturnOutOfOrder() {
@@ -946,6 +947,159 @@ final class LearningCoreTests: XCTestCase {
         XCTAssertEqual(defaults.baseURL, "https://proxy.example.com/v1")
         XCTAssertEqual(defaults.modelID, "custom-model")
         XCTAssertEqual(defaults.reasoningEffort, "low")
+    }
+
+    func testTranslationProviderNormalizesOpenRouterAndFallsBackToDashScope() {
+        XCTAssertEqual(TranslationProviderPolicy.normalizedProvider("openrouter"), "openrouter")
+        XCTAssertEqual(TranslationProviderPolicy.normalizedProvider(" OpenRouter "), "openrouter")
+        XCTAssertEqual(TranslationProviderPolicy.normalizedProvider("OPENROUTER"), "openrouter")
+        XCTAssertEqual(TranslationProviderPolicy.normalizedProvider("unknown-vendor"), "dashscope")
+        XCTAssertEqual(TranslationProviderPolicy.normalizedProvider(""), "dashscope")
+    }
+
+    func testTranslationProviderDefaultsForOpenRouter() {
+        let defaults = TranslationProviderPolicy.defaults(forProvider: "openrouter")
+        XCTAssertEqual(defaults.baseURL, "https://openrouter.ai/api/v1")
+        XCTAssertEqual(defaults.modelID, "~openai/gpt-latest")
+        XCTAssertEqual(defaults.reasoningEffort, "medium")
+    }
+
+    func testTranslationProviderDefaultsReplaceKnownValuesWhenSwitchingToOpenRouter() {
+        for (baseURL, modelID, effort) in [
+            ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo", ""),
+            ("https://api.deepseek.com", "deepseek-v4-flash", "high"),
+            ("https://api.cerebras.ai/v1", "gpt-oss-120b", "medium")
+        ] {
+            let defaults = TranslationProviderPolicy.defaultsForProviderSwitch(
+                toProvider: "openrouter",
+                currentBaseURL: baseURL,
+                currentModelID: modelID,
+                currentReasoningEffort: effort
+            )
+            XCTAssertEqual(defaults.baseURL, "https://openrouter.ai/api/v1")
+            XCTAssertEqual(defaults.modelID, "~openai/gpt-latest")
+            XCTAssertEqual(defaults.reasoningEffort, "medium")
+        }
+    }
+
+    func testTranslationProviderDefaultsPreserveCustomValuesWhenSwitchingToOpenRouter() {
+        let defaults = TranslationProviderPolicy.defaultsForProviderSwitch(
+            toProvider: "openrouter",
+            currentBaseURL: "https://proxy.example.com/openrouter/v1",
+            currentModelID: "anthropic/claude-sonnet-4",
+            currentReasoningEffort: "xhigh"
+        )
+
+        XCTAssertEqual(defaults.baseURL, "https://proxy.example.com/openrouter/v1")
+        XCTAssertEqual(defaults.modelID, "anthropic/claude-sonnet-4")
+        XCTAssertEqual(defaults.reasoningEffort, "xhigh")
+    }
+
+    func testTranslationProviderDefaultsDoNotLeakOpenRouterValuesWhenSwitchingAway() {
+        let defaults = TranslationProviderPolicy.defaultsForProviderSwitch(
+            toProvider: "deepseek",
+            currentBaseURL: "https://openrouter.ai/api/v1",
+            currentModelID: "~openai/gpt-latest",
+            currentReasoningEffort: "medium"
+        )
+
+        XCTAssertEqual(defaults.baseURL, "https://api.deepseek.com")
+        XCTAssertEqual(defaults.modelID, "deepseek-v4-flash")
+        XCTAssertEqual(defaults.reasoningEffort, "high")
+    }
+
+    func testTranslationProviderReasoningEffortOptionsMatchProvider() {
+        XCTAssertEqual(
+            TranslationProviderPolicy.reasoningEffortOptions(forProvider: "openrouter"),
+            ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+        )
+        XCTAssertEqual(
+            TranslationProviderPolicy.reasoningEffortOptions(forProvider: "deepseek"),
+            ["high", "max"]
+        )
+        XCTAssertEqual(
+            TranslationProviderPolicy.reasoningEffortOptions(forProvider: "cerebras"),
+            ["low", "medium", "high"]
+        )
+        XCTAssertEqual(TranslationProviderPolicy.reasoningEffortOptions(forProvider: "dashscope"), [])
+    }
+
+    func testTranslationProviderNormalizesAllOpenRouterReasoningEfforts() {
+        for effort in ["none", "minimal", "low", "medium", "high", "xhigh", "max"] {
+            XCTAssertEqual(
+                TranslationProviderPolicy.normalizedReasoningEffort(effort, provider: "openrouter"),
+                effort
+            )
+        }
+        XCTAssertEqual(
+            TranslationProviderPolicy.normalizedReasoningEffort(" MAX ", provider: "openrouter"),
+            "max"
+        )
+        XCTAssertEqual(
+            TranslationProviderPolicy.normalizedReasoningEffort("extreme", provider: "openrouter"),
+            "medium"
+        )
+        XCTAssertEqual(
+            TranslationProviderPolicy.normalizedReasoningEffort("", provider: "openrouter"),
+            "medium"
+        )
+    }
+
+    func testTranslationProviderRetryPolicyTreatsOpenRouterTransientStatuses() {
+        for status in [429, 500, 503] {
+            XCTAssertTrue(TranslationRetryPolicy.shouldRetryHTTPStatus(status, provider: "openrouter"))
+        }
+        XCTAssertFalse(TranslationRetryPolicy.shouldRetryHTTPStatus(400, provider: "openrouter"))
+        XCTAssertFalse(TranslationRetryPolicy.shouldRetryHTTPStatus(401, provider: "openrouter"))
+
+        XCTAssertEqual(
+            TranslationRetryPolicy.retryDelaySeconds(
+                statusCode: 429,
+                provider: "openrouter",
+                attempt: 1,
+                headers: ["Retry-After": "30"]
+            ),
+            30
+        )
+        XCTAssertEqual(
+            TranslationRetryPolicy.retryDelaySeconds(
+                statusCode: 503,
+                provider: "openrouter",
+                attempt: 1,
+                headers: [:]
+            ),
+            2
+        )
+    }
+
+    func testTranslationChatRequestBodyUsesNestedReasoningForOpenRouter() {
+        let body = TranslationChatRequestPolicy.requestBody(
+            provider: "openrouter",
+            modelID: "~openai/gpt-latest",
+            reasoningEffort: "high",
+            messages: [["role": "user", "content": "Translate this."]]
+        )
+
+        XCTAssertEqual(body["model"] as? String, "~openai/gpt-latest")
+        let reasoning = body["reasoning"] as? [String: Any]
+        XCTAssertEqual(reasoning?["effort"] as? String, "high")
+        XCTAssertNil(body["reasoning_effort"])
+        assertNoDeepSeekJSONOutputFields(in: body)
+    }
+
+    func testTranslationChatRequestBodyDefaultsOpenRouterModelAndReasoningEffort() {
+        let body = TranslationChatRequestPolicy.requestBody(
+            provider: " OpenRouter ",
+            modelID: "",
+            reasoningEffort: "unsupported",
+            messages: []
+        )
+
+        XCTAssertEqual(body["model"] as? String, "~openai/gpt-latest")
+        let reasoning = body["reasoning"] as? [String: Any]
+        XCTAssertEqual(reasoning?["effort"] as? String, "medium")
+        XCTAssertNil(body["reasoning_effort"])
+        assertNoDeepSeekJSONOutputFields(in: body)
     }
 
     func testTranslationBlockContextInjectsThreeBeforeAndTwoAfter() {

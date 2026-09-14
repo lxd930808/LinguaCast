@@ -1,0 +1,23 @@
+{
+  "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC2",
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB1",
+  "role": "assistant",
+  "markdown": "The speaker says a small library matters to the town.",
+  "citations": [
+    {
+      "citationId": "ct_01ARZ3NDEKTSV4RRFFQ69G5FF0",
+      "contentKey": "video:youtube:dQw4w9WgXcQ",
+      "startMs": 2700,
+      "endMs": 6900,
+      "quote": "Today we talk about a small library, and why it matters to the town.",
+      "playerTarget": {
+        "contentKey": "video:youtube:dQw4w9WgXcQ",
+        "startMs": 2700,
+        "endMs": 6900
+      },
+      "deepLink": "linguacast://play?content_key=video%3Ayoutube%3AdQw4w9WgXcQ&start_ms=2700"
+    }
+  ],
+  "createdAt": "2026-08-31T01:18:00Z"
+}

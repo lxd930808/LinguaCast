@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 import PodcastEnglishStudioCore
 import CloudSyncKit
@@ -42,40 +43,27 @@ struct SubtitlePresentationSettingsSection: View {
 
     @ViewBuilder
     private var controls: some View {
-            englishSizeControl
-            targetScaleControl
-            orderControl
+        englishSizeControl
+        targetScaleControl
+        orderControl
 
-            if presentation.isTargetSizeProtectedByMinimum(on: platform) {
-                Text(L10n.string(
-                    "settings.subtitle_min_size_hint",
-                    fallback: "Translation size is raised to the platform minimum for readability."
-                ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
+        if presentation.isTargetSizeProtectedByMinimum(on: platform) {
+            Text(L10n.string(
+                "settings.subtitle_min_size_hint",
+                fallback: "Translation size is raised to the platform minimum for readability."
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
 
-            preview
+        SubtitlePresentationPreview(
+            presentation: presentation,
+            targetLanguage: settings.configuration.translationTarget
+        )
     }
 
     @ViewBuilder
     private var englishSizeControl: some View {
-        #if os(tvOS)
-        Picker(
-            L10n.string("settings.subtitle_english_size", fallback: "English Size"),
-            selection: $settings.configuration.subtitleEnglishSizeLevel
-        ) {
-            ForEach(
-                SubtitlePresentationPreferences.minimumEnglishSizeLevel
-                    ... SubtitlePresentationPreferences.maximumEnglishSizeLevel,
-                id: \.self
-            ) { level in
-                Text(englishSizeOptionLabel(level: level)).tag(level)
-            }
-        }
-        .accessibilityIdentifier("settings.subtitle.english-size")
-        .accessibilityValue(Text(verbatim: englishSizeAccessibilityValue))
-        #else
         Stepper(
             value: $settings.configuration.subtitleEnglishSizeLevel,
             in: SubtitlePresentationPreferences.minimumEnglishSizeLevel
@@ -83,13 +71,17 @@ struct SubtitlePresentationSettingsSection: View {
         ) {
             LabeledContent(
                 L10n.string("settings.subtitle_english_size", fallback: "English Size"),
-                value: englishSizeOptionLabel(level: presentation.englishSizeLevel)
+                value: SubtitleOptionLabels.englishSize(
+                    level: presentation.englishSizeLevel,
+                    scalePercent: presentation.targetScalePercent,
+                    order: presentation.order,
+                    platform: platform
+                )
             )
         }
         .accessibilityIdentifier("settings.subtitle.english-size")
         .accessibilityLabel(L10n.string("settings.subtitle_english_size", fallback: "English Size"))
         .accessibilityValue(Text(verbatim: englishSizeAccessibilityValue))
-        #endif
         Text(L10n.string(
             "settings.subtitle_english_size_help",
             fallback: "English subtitle size from level 1 (smallest) to 9 (largest)."
@@ -105,7 +97,14 @@ struct SubtitlePresentationSettingsSection: View {
             selection: $settings.configuration.subtitleTargetScalePercent
         ) {
             ForEach(SubtitlePresentationPreferences.targetScalePercentOptions, id: \.self) { percent in
-                Text(targetScaleOptionLabel(percent: percent)).tag(percent)
+                Text(
+                    SubtitleOptionLabels.targetScale(
+                        percent: percent,
+                        englishSizeLevel: presentation.englishSizeLevel,
+                        order: presentation.order,
+                        platform: platform
+                    )
+                ).tag(percent)
             }
         }
         .accessibilityIdentifier("settings.subtitle.target-scale")
@@ -137,9 +136,8 @@ struct SubtitlePresentationSettingsSection: View {
             ))
             .tag(SubtitleOrder.targetFirst.rawValue)
         }
-        #if os(iOS)
         .pickerStyle(.segmented)
-        #endif
+        .frame(minHeight: 44)
         .accessibilityIdentifier("settings.subtitle.order")
         .accessibilityValue(Text(verbatim: orderAccessibilityValue))
         Text(L10n.string(
@@ -150,156 +148,16 @@ struct SubtitlePresentationSettingsSection: View {
         .foregroundStyle(.secondary)
     }
 
-    private var preview: some View {
-        VStack(alignment: .center, spacing: 6) {
-            Text(L10n.string("settings.subtitle_preview", fallback: "Preview"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: 4) {
-                ForEach(previewLines, id: \.id) { line in
-                    Text(line.text)
-                        .font(.system(
-                            size: line.pointSize,
-                            weight: line.isEnglish ? .semibold : .regular
-                        ))
-                        .foregroundStyle(line.isEnglish ? Color.primary : Color.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("settings.subtitle.preview")
-        .accessibilityLabel(L10n.string("settings.subtitle_preview", fallback: "Preview"))
-        .accessibilityValue(Text(verbatim: previewAccessibilityValue))
-    }
-
-    private var previewLines: [PreviewLine] {
-        let english = PreviewLine(
-            id: "en",
-            text: L10n.string(
-                "settings.subtitle_preview_english_sample",
-                fallback: "Hello, welcome to today's lesson."
-            ),
-            pointSize: englishPointSize,
-            isEnglish: true
-        )
-        let target = PreviewLine(
-            id: "target",
-            text: catalogString(targetSampleKey(for: settings.configuration.translationTarget)),
-            pointSize: targetPointSize,
-            isEnglish: false
-        )
-        switch presentation.order {
-        case .englishFirst: return [english, target]
-        case .targetFirst: return [target, english]
-        }
-    }
-
     private var englishSizeAccessibilityValue: String {
-        L10n.format(
-            "settings.subtitle_english_size_value",
-            fallback: "Level %d, %@",
-            presentation.englishSizeLevel,
-            pointSizeText(englishPointSize)
-        )
+        SubtitleOptionLabels.englishSizeValue(level: presentation.englishSizeLevel, pointSize: englishPointSize)
     }
 
     private var targetScaleAccessibilityValue: String {
-        L10n.format(
-            "settings.subtitle_target_scale_value",
-            fallback: "%@, %@",
-            percentText(presentation.targetScalePercent),
-            pointSizeText(targetPointSize)
-        )
+        SubtitleOptionLabels.targetScaleValue(percent: presentation.targetScalePercent, pointSize: targetPointSize)
     }
 
     private var orderAccessibilityValue: String {
-        switch presentation.order {
-        case .englishFirst:
-            return L10n.string(
-                "settings.subtitle_order_english_first",
-                fallback: "English first"
-            )
-        case .targetFirst:
-            return L10n.format(
-                "settings.subtitle_order_target_first",
-                fallback: "%@ first",
-                targetLanguageName
-            )
-        }
-    }
-
-    private var previewAccessibilityValue: String {
-        previewLines.map(\.text).joined(separator: "\n")
-    }
-
-    private func englishSizeOptionLabel(level: Int) -> String {
-        let size = SubtitlePresentationPreferences(
-            englishSizeLevel: level,
-            targetScalePercent: presentation.targetScalePercent,
-            order: presentation.order
-        ).englishPointSize(on: platform)
-        return L10n.format(
-            "settings.subtitle_english_size_option",
-            fallback: "%d · %@",
-            level,
-            pointSizeText(size)
-        )
-    }
-
-    private func targetScaleOptionLabel(percent: Int) -> String {
-        let size = SubtitlePresentationPreferences(
-            englishSizeLevel: presentation.englishSizeLevel,
-            targetScalePercent: percent,
-            order: presentation.order
-        ).targetPointSize(on: platform)
-        return L10n.format(
-            "settings.subtitle_target_scale_option",
-            fallback: "%@ · %@",
-            percentText(percent),
-            pointSizeText(size)
-        )
-    }
-
-    private func pointSizeText(_ value: Double) -> String {
-        L10n.format("settings.subtitle_size_pt_format", fallback: "%g pt", value)
-    }
-
-    private func percentText(_ value: Int) -> String {
-        L10n.format("settings.subtitle_target_scale_format", fallback: "%d%%", value)
-    }
-
-    /// Sample lines are stored only in the string catalog so Settings source stays free of CJK literals.
-    private func targetSampleKey(for target: TranslationTarget) -> String {
-        switch target {
-        case .simplifiedChinese: "settings.subtitle_preview_target_sample_zh_Hans"
-        case .traditionalChinese: "settings.subtitle_preview_target_sample_zh_Hant"
-        case .spanish: "settings.subtitle_preview_target_sample_es"
-        case .brazilianPortuguese: "settings.subtitle_preview_target_sample_pt_BR"
-        case .japanese: "settings.subtitle_preview_target_sample_ja"
-        case .korean: "settings.subtitle_preview_target_sample_ko"
-        case .french: "settings.subtitle_preview_target_sample_fr"
-        case .german: "settings.subtitle_preview_target_sample_de"
-        case .arabic: "settings.subtitle_preview_target_sample_ar"
-        }
-    }
-
-    private func catalogString(_ key: String) -> String {
-        let value = Bundle.main.localizedString(forKey: key, value: nil, table: nil)
-        return value == key ? "" : value
+        SubtitleOptionLabels.orderValue(order: presentation.order, targetLanguageName: targetLanguageName)
     }
 }
-
-private struct PreviewLine: Hashable {
-    let id: String
-    let text: String
-    let pointSize: Double
-    let isEnglish: Bool
-}
+#endif

@@ -225,17 +225,21 @@ final class LocalSetupServer {
                 <option value="dashscope">DashScope</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="cerebras">Cerebras</option>
+                <option value="openrouter">OpenRouter</option>
               </select>
               <label>Translation Base URL</label>
-              <input name="translationBaseURL" placeholder="https://api.deepseek.com" autocomplete="off">
+              <input name="translationBaseURL" placeholder="Provider default" autocomplete="off">
               <label>Model ID</label>
-              <input name="translationModelID" placeholder="deepseek-v4-flash" autocomplete="off">
+              <input name="translationModelID" placeholder="Provider default" autocomplete="off">
               <label>Reasoning Effort</label>
               <select name="translationReasoningEffort">
                 <option value="">\(htmlEscape(copy.noChange))</option>
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
                 <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
                 <option value="max">max</option>
               </select>
               <label>OSS Endpoint</label>

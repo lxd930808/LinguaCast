@@ -1,0 +1,36 @@
+{
+  "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "title": "AI and accounting",
+  "phase": "ready",
+  "status": "ready",
+  "workspaceStatus": "ready",
+  "outputLanguage": "zh-Hans",
+  "storefront": "US",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "activeTurnId": null,
+  "artifactCounts": {
+    "web_search": 0,
+    "web_page": 0,
+    "podcast_search": 0,
+    "youtube_search": 0,
+    "transcript": 0,
+    "research_memory": 0,
+    "report": 0
+  },
+  "grants": [
+    {
+      "alias": "notes",
+      "permission": "read",
+      "allowedExtensions": [
+        ".md",
+        ".txt"
+      ],
+      "maxFileBytes": 2097152,
+      "grantedAt": "2026-09-03T01:00:00Z",
+      "status": "ready"
+    }
+  ],
+  "createdAt": "2026-09-03T01:00:00Z",
+  "updatedAt": "2026-09-03T01:00:00Z"
+}

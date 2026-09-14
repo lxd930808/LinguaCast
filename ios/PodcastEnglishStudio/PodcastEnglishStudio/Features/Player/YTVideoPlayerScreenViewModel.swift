@@ -21,6 +21,35 @@ final class YTVideoPlayerScreenViewModel {
     var showingPlayerActions = false
     var availableQualityTiers: [YTStreamSelectionPolicy] = YTStreamSelectionPolicy.qualityTierOptions
 
+    var videoSaveState: String?
+    var videoSaveError: String?
+    var isRetryingVideoSave = false
+    private var didRenewVideoRetention = false
+
+    func refreshVideoSave(configuration: AppConfiguration, retry: Bool = false) async {
+        guard let client = CloudContentGatewayFactory.makeClient(configuration: configuration) else { return }
+        if retry && isRetryingVideoSave { return }
+        if retry { isRetryingVideoSave = true }
+        defer { if retry { isRetryingVideoSave = false } }
+        do {
+            let key = CloudContentKeyPolicy.videoContentKey(platform: "youtube", videoID: video.id)
+            let result = try await client.videoSaveStatus(contentKey: key, retry: retry)
+            videoSaveState = result.state
+            // iPhone iframe playback also counts as viewing the saved video.
+            if result.state == "ready" && !didRenewVideoRetention {
+                _ = try await client.fetchVideoPlaybackURL(contentKey: key)
+                didRenewVideoRetention = true
+            }
+            if result.failureCode == "MEDIA_BUDGET_EXCEEDED" {
+                videoSaveError = L10n.string("video_save.budget", fallback: "Cloud video storage is full. Subtitles remain available.")
+            } else if result.failureCode != nil {
+                videoSaveError = L10n.string("video_save.failed", fallback: "Video save failed · Subtitles remain available")
+            } else { videoSaveError = nil }
+        } catch {
+            videoSaveError = L10n.string("video_save.query_failed", fallback: "Could not check cloud video. Please retry.")
+        }
+    }
+
     init(video: YTVideoRecord) {
         self.video = video
     }
@@ -37,10 +66,19 @@ final class YTVideoPlayerScreenViewModel {
     }
 
     var canRetrySubtitles: Bool {
+        // WP14: cloud failures marked non-retryable (restricted/gone source,
+        // fatal pipeline errors) hide the direct Retry action.
         !isRetryingSubtitles
+            && cloudGenerationState.retryable
             && (video.subtitleStatus == "failed"
                 || video.subtitleStatus == "partial"
                 || (video.enReady && !video.zhReady))
+    }
+
+    /// Shared observable cloud state (WP14 task 1) projected from the video
+    /// record; identical semantics to the podcast detail screen.
+    var cloudGenerationState: CloudContentGenerationState {
+        CloudContentGenerationState.video(video: video)
     }
 
     var subtitleActionMessage: String {
@@ -49,12 +87,24 @@ final class YTVideoPlayerScreenViewModel {
         case "ready": return L10n.string("ytvideo_player.bilingual_subtitles_are_ready", fallback: "Bilingual subtitles are ready")
         case "partial": return L10n.string("ytvideo_player.the_english_subtitles_have_been_saved_and_the_translation_will_b", fallback: "The English subtitles have been saved and the translation will be tried again.")
         case "running": return L10n.string("ytvideo_player.getting_english_subtitles", fallback: "Getting English subtitles")
+        case "generating":
+            // WP13 cloud pipeline in flight (queued / running on the server).
+            return YTSourceGenerationProgressText.title(
+                step: video.sourceGenerationStep,
+                progress: video.sourceGenerationProgress
+            ) ?? L10n.string("ytvideo_player.cloud_generating", fallback: "Generating in the cloud")
         case "translating":
             if let totalCount = video.subtitleTotalCount, totalCount > 0 {
-                return L10n.format("subtitles.translating_progress", fallback: "LLM subtitle translation %@/%@", String(video.subtitleTranslatedCount ?? 0), String(totalCount))
+                return YTSourceGenerationProgressText.title(step: "translating", progress: nil, completedCount: video.subtitleTranslatedCount, totalCount: totalCount) ?? PipelineStepTitle.display("translate")
             }
-            return L10n.string("ytvideo_player.translating_subtitles_in_llm", fallback: "Translating subtitles in LLM")
+            return PipelineStepTitle.display("translate")
         case "failed":
+            // WP14: surface the localized cloud failure (with [CODE] suffix)
+            // when the cloud backend recorded one.
+            if let presented = CloudErrorMessagePresenter.display(video.lastError),
+               CloudErrorMessagePresenter.errorCode(fromMessage: video.lastError) != nil {
+                return presented
+            }
             return L10n.string("subtitles.unavailable", fallback: "Subtitles Unavailable")
         default:
             return video.enReady ? L10n.string("ytvideo_player.the_english_subtitles_have_been_saved_and_the_translation_will_b", fallback: "The English subtitles have been saved and the translation will be tried again.") : L10n.string("ytvideo_player.automatically_obtain_subtitles_after_entering_the_play_page", fallback: "Automatically obtain subtitles after entering the play page")
@@ -71,6 +121,7 @@ final class YTVideoPlayerScreenViewModel {
         case "failed": return L10n.string("common.subtitles_failed", fallback: "Subtitles failed")
         case "partial": return L10n.string("ytvideo_player.retryable_subtitles", fallback: "Retryable subtitles")
         case "running": return L10n.string("ytvideo_player.get_subtitles", fallback: "Get subtitles")
+        case "generating": return L10n.string("ytvideo_player.cloud_generating", fallback: "Generating in the cloud")
         case "translating": return L10n.string("ytvideo_player.translate_subtitles", fallback: "Translate subtitles")
         default: return video.enReady ? L10n.string("common.english_subtitles", fallback: "English subtitles") : L10n.string("ytvideo_player.subtitle_status", fallback: "subtitle status")
         }
@@ -209,7 +260,10 @@ final class YTVideoPlayerScreenViewModel {
             subtitleState.errorMessage = nil
         } catch {
             guard AsyncOperationErrorPresentationPolicy.shouldPresent(error) else { return }
-            errorMessage = L10n.format("subtitles.error.retry", fallback: "Subtitle retry failed: %@", error.localizedDescription)
+            // WP14: cloud failures carry a stable [CODE]; localize at display time.
+            let presented = CloudErrorMessagePresenter.display(error.localizedDescription)
+                ?? error.localizedDescription
+            errorMessage = L10n.format("subtitles.error.retry", fallback: "Subtitle retry failed: %@", presented)
         }
     }
 }

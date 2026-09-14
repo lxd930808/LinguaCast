@@ -140,6 +140,7 @@ struct YTPlayerView: View {
                 onAvailableQualitiesChange?([])
                 return
             }
+            model.cloudConfiguration = settings.committedConfiguration
             model.resetAutoDowngrade()
             await model.load(
                 videoID: videoID,

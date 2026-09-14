@@ -50,27 +50,29 @@ final class PodcastLockResumeUITests: XCTestCase {
             "Play/pause midY jumped across background/foreground"
         )
 
-        playPause.tap()
-
-        // Resume from saved ~8s → cue 9 should remain active and visible with follow on.
+        // Verify the saved cue while paused; a one-second cue may advance while
+        // XCTest waits for the tap animation and the application to become idle.
         let activeCue = app.descendants(matching: .any)["transcript.segment.9"]
         XCTAssertTrue(activeCue.waitForExistence(timeout: 5))
         XCTAssertEqual(activeCue.value as? String, "active")
-        XCTAssertTrue(activeCue.isHittable, "Active subtitle must stay visible after unlock play")
+        XCTAssertTrue(activeCue.isHittable, "Saved subtitle must stay visible after activation")
+        playPause.tap()
 
-        // Follow continues: after a couple seconds cue 11 should become active.
-        let laterCue = app.descendants(matching: .any)["transcript.segment.11"]
         let deadline = Date().addingTimeInterval(6)
         var sawLater = false
         while Date() < deadline {
-            if laterCue.exists, (laterCue.value as? String) == "active" {
+            let current = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "value == %@", "active")).firstMatch
+            if current.exists,
+               let sequence = Int(current.identifier.replacingOccurrences(of: "transcript.segment.", with: "")),
+               sequence >= 11 {
+                XCTAssertTrue(current.isHittable, "The resumed active subtitle must remain visible")
                 sawLater = true
                 break
             }
             Thread.sleep(forTimeInterval: 0.25)
         }
         XCTAssertTrue(sawLater, "Subtitle follow did not advance after resume play")
-        XCTAssertTrue(laterCue.isHittable)
 
         app.terminate()
         #endif
@@ -105,7 +107,7 @@ final class PodcastLockResumeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["LINGUACAST_UI_SCENARIO"] = "podcast-lock-resume"
         app.launchArguments = [
-            "-linguacast-ui-testing",
+            "-linguacast-ui-testing", "-linguacast-ui-hide-test-chrome",
             "-AppleLanguages", "(en)",
             "-AppleLocale", "en_US",
             "-linguacast-ui-scenario", "podcast-lock-resume"

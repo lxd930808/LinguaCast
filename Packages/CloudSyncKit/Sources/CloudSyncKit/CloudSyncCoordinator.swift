@@ -562,6 +562,7 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         completedAt: Date?,
         modifiedAt: Date = Date()
     ) {
+        guard episode.catalogOrigin != .assistant else { return }
         let catalog = Self.catalogSnapshot(
             episode: episode,
             subscription: subscription,
@@ -586,6 +587,7 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         completedAt: Date?,
         modifiedAt: Date = Date()
     ) {
+        guard video.catalogOrigin != .assistant else { return }
         let catalog = Self.catalogSnapshot(video: video, modifiedAt: modifiedAt, deviceID: deviceID)
         recordPlaybackProgress(
             .youtubeVideo(videoID: video.id),
@@ -1364,6 +1366,7 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         let videos = try context.fetch(FetchDescriptor<YTVideoRecord>())
         return videos.first {
             Self.playbackProgressRecordName(for: .youtubeVideo(videoID: $0.id)) == recordName
+                && $0.catalogOrigin != .assistant
         }
     }
 

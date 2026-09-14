@@ -8,61 +8,63 @@ struct YTAccountView: View {
     @State private var isClearing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            LinguaCard {
-                HStack(spacing: 16) {
-                    Image(systemName: webSession.isLoggedIn ? "person.crop.circle.fill.badge.checkmark" : "person.crop.circle")
-                        .font(.system(size: 36, weight: .semibold))
-                        .foregroundStyle(webSession.isLoggedIn ? LinguaTheme.success : LinguaTheme.accent)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(L10n.string("ytaccount.youtube_account", fallback: "YouTube Account"))
-                            .font(.title3.bold())
-                        Text(
-                            webSession.isLoggedIn
-                                ? L10n.string("ytaccount.logged_in_youtube", fallback: "Logged in YouTube")
-                                : L10n.string("ytaccount.sign_in_to_try_ad_free_and_recommendations", fallback: "Sign in to try ad-free and recommendations")
-                        )
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if webSession.isLoggedIn {
-                        Button(
-                            isClearing
-                                ? L10n.string("ytaccount.exiting", fallback: "Exiting")
-                                : L10n.string("ytaccount.log_out", fallback: "Log out"),
-                            role: .destructive
-                        ) {
-                            Task { await clearLogin() }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                LinguaCard {
+                    HStack(spacing: 16) {
+                        Image(systemName: webSession.isLoggedIn ? "person.crop.circle.fill.badge.checkmark" : "person.crop.circle")
+                            .font(.system(size: 36, weight: .semibold))
+                            .foregroundStyle(webSession.isLoggedIn ? LinguaTheme.success : LinguaTheme.accent)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(L10n.string("ytaccount.youtube_account", fallback: "YouTube Account"))
+                                .font(.title3.bold())
+                            Text(
+                                webSession.isLoggedIn
+                                    ? L10n.string("ytaccount.logged_in_youtube", fallback: "Logged in YouTube")
+                                    : L10n.string("ytaccount.sign_in_to_try_ad_free_and_recommendations", fallback: "Sign in to try ad-free and recommendations")
+                            )
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(isClearing)
+                        Spacer()
+                        if webSession.isLoggedIn {
+                            Button(
+                                isClearing
+                                    ? L10n.string("ytaccount.exiting", fallback: "Exiting")
+                                    : L10n.string("ytaccount.log_out", fallback: "Log out"),
+                                role: .destructive
+                            ) {
+                                Task { await clearLogin() }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isClearing)
+                        }
                     }
                 }
-            }
 
-            LinguaCard {
-                Label(
-                    L10n.string(
-                        "ytaccount.login_only_occurs_on_the_google_page_and_the_app_does_not_read_o",
-                        fallback: "Login only occurs on the Google page, and the App does not read or save the account password. YouTube Whether to display ads is determined by YouTube."
-                    ),
-                    systemImage: "hand.raised.fill"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
-
-            YTLoginWebView(webSession: webSession)
-                .clipShape(RoundedRectangle(cornerRadius: LinguaTheme.cardRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: LinguaTheme.cardRadius, style: .continuous)
-                        .stroke(LinguaTheme.border, lineWidth: 1)
+                LinguaCard {
+                    Label(
+                        L10n.string(
+                            "ytaccount.login_only_occurs_on_the_google_page_and_the_app_does_not_read_o",
+                            fallback: "Login only occurs on the Google page, and the App does not read or save the account password. YouTube Whether to display ads is determined by YouTube."
+                        ),
+                        systemImage: "hand.raised.fill"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 420)
+
+                YTLoginWebView(webSession: webSession)
+                    .clipShape(RoundedRectangle(cornerRadius: LinguaTheme.cardRadius, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LinguaTheme.cardRadius, style: .continuous)
+                            .stroke(LinguaTheme.border, lineWidth: 1)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 420)
+            }
+            .padding(LinguaTheme.pageHorizontalPadding)
+            .linguaContentWidth()
         }
-        .padding(LinguaTheme.pageHorizontalPadding)
-        .linguaContentWidth()
         .linguaPage()
         .accessibilityIdentifier("screen.youtube-account")
         .navigationTitle(L10n.string("ytaccount.youtube_account", fallback: "YouTube Account"))

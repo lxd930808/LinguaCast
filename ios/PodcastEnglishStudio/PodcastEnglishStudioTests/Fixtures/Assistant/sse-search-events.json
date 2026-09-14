@@ -1,0 +1,57 @@
+{
+  "events": [
+    {
+      "id": "20",
+      "event": "search.plan_ready",
+      "data": {
+        "schemaVersion": 1,
+        "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "sequence": 20,
+        "occurredAt": "2026-08-31T01:09:59Z",
+        "payload": { "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE0", "intent": "person", "queryCount": 1 }
+      }
+    },
+    {
+      "id": "21",
+      "event": "search.source_started",
+      "data": {
+        "schemaVersion": 1,
+        "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "sequence": 21,
+        "occurredAt": "2026-08-31T01:10:00Z",
+        "payload": { "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE0", "provider": "podcastindex" }
+      }
+    },
+    {
+      "id": "22",
+      "event": "search.source_completed",
+      "data": {
+        "schemaVersion": 1,
+        "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "sequence": 22,
+        "occurredAt": "2026-08-31T01:10:01Z",
+        "payload": {
+          "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE0",
+          "provider": "podcastindex",
+          "status": "success",
+          "acceptedCount": 8
+        }
+      }
+    },
+    {
+      "id": "23",
+      "event": "search.results_ranked",
+      "data": {
+        "schemaVersion": 1,
+        "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "sequence": 23,
+        "occurredAt": "2026-08-31T01:10:02Z",
+        "payload": { "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE0", "acceptedCount": 8 }
+      }
+    }
+  ]
+}

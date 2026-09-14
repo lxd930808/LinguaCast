@@ -1,0 +1,20 @@
+{
+  "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE2",
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+  "provider": "aggregate",
+  "query": "asdkfjhaskdf qwerzxcv podcast",
+  "status": "empty",
+  "createdAt": "2026-08-31T01:12:00Z",
+  "providerStatus": [
+    {
+      "provider": "podcastindex",
+      "status": "empty",
+      "latencyMs": 300,
+      "rawCount": 0,
+      "acceptedCount": 0
+    }
+  ],
+  "results": [],
+  "warnings": ["SEARCH_FILTERED_EMPTY"]
+}

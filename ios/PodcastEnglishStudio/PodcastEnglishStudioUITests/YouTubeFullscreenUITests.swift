@@ -99,7 +99,7 @@ final class YouTubeFullscreenUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["player.settings.video-panel"].waitForExistence(timeout: 5))
         let close = app.buttons["Close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.tap()

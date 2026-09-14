@@ -1,0 +1,101 @@
+{
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "title": "AI and accounting",
+  "phase": "report_ready",
+  "outputLanguage": "zh-Hans",
+  "storefront": "US",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "createdAt": "2026-08-31T01:00:00Z",
+  "updatedAt": "2026-08-31T01:08:00Z",
+  "messages": [
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC0",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "role": "user",
+      "markdown": "Find English podcasts and videos about AI impact on accounting",
+      "createdAt": "2026-08-31T01:00:01Z"
+    },
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC1",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "role": "assistant",
+      "markdown": "## Theme\nSearch metadata only. No full transcripts were read.",
+      "createdAt": "2026-08-31T01:08:00Z"
+    }
+  ],
+  "report": {
+    "title": "AI and accounting",
+    "summary": "Candidate videos and podcasts from search metadata. Full transcripts have not been read.",
+    "stage": "metadata",
+    "markdown": "## Overview\nResults discuss AI tooling in accounting firms.\n\n## Limits\nThis report is based on titles and descriptions only.",
+    "sources": [
+      {
+        "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+        "ordinal": 1,
+        "reason": "Direct talk about AI tools in accounting firms."
+      },
+      {
+        "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+        "ordinal": 2,
+        "reason": "Episode description mentions audit sampling with models."
+      }
+    ],
+    "createdAt": "2026-08-31T01:08:00Z"
+  },
+  "sourceGroups": [
+    {
+      "reportId": "rp_accounting01",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "title": "AI and accounting",
+      "createdAt": "2026-08-31T01:08:00Z",
+      "sources": [
+        {
+          "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+          "ordinal": 1,
+          "reason": "Direct talk about AI tools in accounting firms."
+        },
+        {
+          "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+          "ordinal": 2,
+          "reason": "Episode description mentions audit sampling with models."
+        }
+      ]
+    }
+  ],
+  "searchResults": [
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+      "platform": "youtube",
+      "sourceType": "video",
+      "sourceId": "dQw4w9WgXcQ",
+      "canonicalURL": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "title": "How AI is changing accounting",
+      "publisher": "Example Channel",
+      "publishedAt": "2026-07-01T12:00:00Z",
+      "durationSeconds": 812,
+      "provider": "ytdlp",
+      "fallback": false,
+      "deepResearchAvailability": "available"
+    },
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+      "platform": "apple_podcasts",
+      "sourceType": "podcast_episode",
+      "sourceId": "ep-ai-ledger-2026",
+      "canonicalURL": "https://podcasts.apple.com/us/podcast/id1234567890?i=1000123456789",
+      "feedURL": "https://feeds.example.com/accounting.xml",
+      "title": "AI and the ledger",
+      "publisher": "Example Media",
+      "publishedAt": "2026-06-15T08:00:00Z",
+      "durationSeconds": 2460,
+      "provider": "rss",
+      "fallback": false,
+      "deepResearchAvailability": "available"
+    }
+  ],
+  "binding": null,
+  "activeTurn": null
+}

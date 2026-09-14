@@ -85,7 +85,7 @@ struct YTChannelDetailView: View {
                 if let video = video(for: route.videoID) {
                     YTVideoPlayerScreen(video: video)
                 } else {
-                    ContentUnavailableView(L10n.string("ytchannel_detail.video_does_not_exist", fallback: "Video does not exist"), systemImage: "play.rectangle")
+                    LinguaEmptyState(L10n.string("ytchannel_detail.video_does_not_exist", fallback: "Video does not exist"), systemImage: "play.rectangle", kind: .failure)
                 }
             }
         #else
@@ -97,7 +97,7 @@ struct YTChannelDetailView: View {
                    let video = video(for: selectedVideoID) {
                     YTVideoPlayerPresentation(video: video)
                 } else {
-                    ContentUnavailableView(L10n.string("ytchannel_detail.video_does_not_exist", fallback: "Video does not exist"), systemImage: "play.rectangle")
+                    LinguaEmptyState(L10n.string("ytchannel_detail.video_does_not_exist", fallback: "Video does not exist"), systemImage: "play.rectangle", kind: .failure)
                 }
             }
         #endif
@@ -122,7 +122,7 @@ struct YTChannelDetailView: View {
                 }
                 if videos.isEmpty && !isLoading {
                     LinguaCard {
-                        ContentUnavailableView(
+                        LinguaEmptyState(
                             L10n.string("ytchannel_detail.no_video_yet", fallback: "No video yet"),
                             systemImage: "play.rectangle"
                         )
@@ -165,6 +165,7 @@ struct YTChannelDetailView: View {
                             .padding(.vertical, 20)
                         }
                         .scrollClipDisabled()
+                        .focusSection()
                         #else
                         LazyVGrid(columns: videoColumns, spacing: 18) {
                             ForEach(selectedPlaybackVideos) { video in
@@ -190,10 +191,10 @@ struct YTChannelDetailView: View {
             immersiveHeaderBackground
             HStack(spacing: 18) {
                 channelArtwork
-                    .frame(width: 120, height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .frame(width: 132, height: 132)
+                    .clipShape(Circle())
                     .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        Circle()
                             .stroke(Color.white.opacity(0.18), lineWidth: 1)
                     }
                 VStack(alignment: .leading, spacing: 8) {
@@ -226,8 +227,8 @@ struct YTChannelDetailView: View {
         LinguaCard {
             HStack(spacing: 18) {
                 channelArtwork
-                    .frame(width: 104, height: 104)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .frame(width: 64, height: 64)
+                    .clipShape(Circle())
                 VStack(alignment: .leading, spacing: 8) {
                     Text(channel.displayName)
                         .font(.title2.bold())
@@ -339,7 +340,8 @@ struct YTChannelDetailView: View {
 
     private var visibleVideos: [YTVideoRecord] {
         videos.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.title, channel: channel.displayName)
+            $0.appearsInSubscriptionLibrary &&
+                !contentFilter.isFilteredOut(id: $0.id, title: $0.title, channel: channel.displayName)
         }
     }
 
@@ -534,7 +536,10 @@ private struct YTVideoPosterCardLabel: View {
     var video: YTVideoRecord
 
     private let posterWidth: CGFloat = 400
-    private let posterHeight: CGFloat = 225
+    private var posterHeight: CGFloat {
+        198 - (video.subtitleStatus == "translating" && progress != nil ? 10 : 0)
+            - (playbackProgressValue != nil ? 12 : 0)
+    }
 
     var body: some View {
         LinguaCard(padding: 12, cornerRadius: 20) {
@@ -542,7 +547,7 @@ private struct YTVideoPosterCardLabel: View {
                 posterThumbnail
                 VStack(alignment: .leading, spacing: 6) {
                     Text(video.title)
-                        .font(.headline)
+                        .font(.system(size: 25, weight: .bold))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -550,14 +555,20 @@ private struct YTVideoPosterCardLabel: View {
                         LinguaStatusChip(
                             title: statusText,
                             systemImage: statusIcon,
-                            tone: statusTone
+                            tone: statusTone,
+                            font: .system(size: 19, weight: .semibold)
                         )
-                        if let publishedAt = video.publishedAt {
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                        if video.subtitleStatus != "translating", let publishedAt = video.publishedAt {
                             Text(publishedAt, style: .date)
-                                .font(.caption)
+                                .font(.system(size: 19))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
+                    }
+                    if video.subtitleStatus == "translating", let progress {
+                        LinguaProgressBar(value: progress.fraction)
                     }
                     if let playbackProgressValue {
                         LinguaProgressBar(value: playbackProgressValue)
@@ -631,15 +642,10 @@ private struct YTVideoPosterCardLabel: View {
             return L10n.string("common.subtitles_failed", fallback: "Subtitles failed")
         }
         if video.subtitleStatus == "translating", let progress {
-            return L10n.format(
-                "subtitles.translating_progress",
-                fallback: "LLM subtitle translation %@/%@",
-                String(progress.translatedCount),
-                String(progress.totalCount)
-            )
+            return YTSourceGenerationProgressText.title(step: "translating", progress: nil, completedCount: progress.translatedCount, totalCount: progress.totalCount) ?? PipelineStepTitle.display("translate")
         }
         if video.subtitleStatus == "translating" {
-            return L10n.string("ytchannel_detail.llm_translating", fallback: "LLM Translating")
+            return PipelineStepTitle.display("translate")
         }
         if video.subtitleStatus == "running" {
             return L10n.string("common.subtitles_in_preparation", fallback: "Subtitles in preparation")
@@ -787,11 +793,7 @@ private struct YTVideoRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             if showsTranslationProgress, let progress {
-                ProgressView(value: progress.fraction)
-                    .progressViewStyle(.linear)
-                Text(verbatim: "\(progress.translatedCount)/\(progress.totalCount)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                LinguaProgressBar(value: progress.fraction)
             }
             if let playbackText {
                 HStack(spacing: 8) {
@@ -804,8 +806,7 @@ private struct YTVideoRow: View {
                 .foregroundStyle(.secondary)
             }
             if let playbackProgressValue {
-                ProgressView(value: playbackProgressValue)
-                    .progressViewStyle(.linear)
+                LinguaProgressBar(value: playbackProgressValue)
                     .environment(\.layoutDirection, .leftToRight)
                     .accessibilityIdentifier("media.playback-progress")
                     .accessibilityValue(Text(verbatim: "ltr"))
@@ -820,9 +821,9 @@ private struct YTVideoRow: View {
         if video.subtitleStatus == "running" { return L10n.string("common.subtitles_in_preparation", fallback: "Subtitles in preparation") }
         if video.subtitleStatus == "translating" {
             if let progress {
-                return L10n.format("subtitles.translating_progress", fallback: "LLM subtitle translation %@/%@", String(progress.translatedCount), String(progress.totalCount))
+                return YTSourceGenerationProgressText.title(step: "translating", progress: nil, completedCount: progress.translatedCount, totalCount: progress.totalCount) ?? PipelineStepTitle.display("translate")
             }
-            return L10n.string("ytchannel_detail.llm_translating", fallback: "LLM Translating")
+            return PipelineStepTitle.display("translate")
         }
         if video.subtitleStatus == "partial" {
             if let progress {

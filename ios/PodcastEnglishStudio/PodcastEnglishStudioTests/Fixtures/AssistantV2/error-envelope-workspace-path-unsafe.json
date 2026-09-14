@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "WORKSPACE_PATH_UNSAFE",
+    "message": "Virtual path is not allowed",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {
+      "uri": "research://../etc/passwd"
+    }
+  }
+}

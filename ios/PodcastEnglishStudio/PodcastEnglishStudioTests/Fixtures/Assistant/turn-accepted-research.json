@@ -1,0 +1,8 @@
+{
+  "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "kind": "research",
+  "status": "queued",
+  "eventsURL": "/v1/assistant/turns/at_01ARZ3NDEKTSV4RRFFQ69G5FB0/events",
+  "reused": false
+}

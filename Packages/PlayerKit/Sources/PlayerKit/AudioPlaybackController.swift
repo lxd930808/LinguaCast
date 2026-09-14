@@ -19,6 +19,20 @@ public final class AudioPlaybackController {
     /// position to finish before starting playback (lock/unlock resume path).
     public private(set) var pendingResumeSeekTime: TimeInterval?
 
+    /// The source backing the current player item. In-memory only: signed URLs
+    /// are never persisted (WP12).
+    public private(set) var currentSource: AudioPlaybackSource?
+
+    /// Validation policy for remote sources (HTTPS + optional host allowlist).
+    /// Local-file sources are unaffected.
+    public var remoteHostPolicy: RemoteAudioHostPolicy
+
+    /// App-injected hook fired once per item when the current remote item fails
+    /// (401/403/expired/transport). PlayerKit performs no networking; the app
+    /// should fetch a fresh signed source and call replaceSourcePreservingPosition(_:).
+    public var onSourceRefreshRequired: (@MainActor (AudioPlaybackSource) -> Void)?
+
+    @ObservationIgnored private var playbackRequestID = UUID()
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var itemStatusObservation: NSKeyValueObservation?
@@ -27,8 +41,11 @@ public final class AudioPlaybackController {
     @ObservationIgnored private var segmentIndex = EpisodePlaybackSegmentIndex(segments: [])
     @ObservationIgnored private var requestedInitialTime: TimeInterval?
     @ObservationIgnored private var isSeekingBeforePlay = false
+    @ObservationIgnored private var refreshRequestedForCurrentItem = false
 
-    public init() {}
+    public init(remoteHostPolicy: RemoteAudioHostPolicy = .anySecureHost) {
+        self.remoteHostPolicy = remoteHostPolicy
+    }
 
     deinit {
         if let timeObserver, let player {
@@ -36,14 +53,22 @@ public final class AudioPlaybackController {
         }
     }
 
+    /// Local-file entry point kept source-compatible; forwards to load(source:).
     public func load(audioURL: URL, segments: [LearningSegment], initialTime: TimeInterval? = nil) {
+        load(source: .localFile(audioURL), segments: segments, initialTime: initialTime)
+    }
+
+    public func load(source: AudioPlaybackSource, segments: [LearningSegment], initialTime: TimeInterval? = nil) {
+        pausePlayback()
         self.segments = EpisodePlaybackSegmentPolicy.sorted(segments)
         segmentIndex = EpisodePlaybackSegmentIndex(segments: self.segments)
         let transcriptExtent = EpisodePlaybackSegmentPolicy.inferredDuration(from: self.segments) ?? 0
         duration = transcriptExtent
-        guard validateAudioFile(audioURL) else { return }
+        guard validateSource(source) else { return }
+        currentSource = source
         let player = ensurePlayer()
-        let item = AVPlayerItem(url: audioURL)
+        let item = AVPlayerItem(url: source.url)
+        refreshRequestedForCurrentItem = false
         observe(item)
         player.replaceCurrentItem(with: item)
         requestedInitialTime = PlaybackProgressPolicy.restorePosition(from: initialTime)
@@ -62,6 +87,36 @@ public final class AudioPlaybackController {
         errorMessage = nil
     }
 
+    /// Signed-URL refresh: swaps only the player item, preserving currentTime,
+    /// playbackRate, activeSequence and any unconsumed pending resume. When the
+    /// new source fails validation the current state (including last position)
+    /// is left untouched.
+    public func replaceSourcePreservingPosition(_ source: AudioPlaybackSource) {
+        guard validateSource(source) else { return }
+        playbackRequestID = UUID()
+        let restoredTime = pendingResumeSeekTime ?? currentTime
+        let stashedResume = pendingResumeSeekTime
+        currentSource = source
+        let player = ensurePlayer()
+        let item = AVPlayerItem(url: source.url)
+        refreshRequestedForCurrentItem = false
+        observe(item)
+        player.replaceCurrentItem(with: item)
+        // Re-apply the position when the real media duration arrives late,
+        // mirroring the load(initialTime:) path.
+        requestedInitialTime = PlaybackProgressPolicy.restorePosition(from: restoredTime)
+        let target = PlaybackSeekPolicy.clampedTime(restoredTime, duration: duration)
+        currentTime = target
+        activeSequence = nearestSequence(at: target)
+        pendingResumeSeekTime = stashedResume
+        isSeekingBeforePlay = false
+        if target > 0 {
+            let time = CMTime(seconds: target, preferredTimescale: 600)
+            player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        errorMessage = nil
+    }
+
     public func playPause() {
         if isPlaying || isSeekingBeforePlay {
             pausePlayback()
@@ -71,6 +126,7 @@ public final class AudioPlaybackController {
     }
 
     public func pausePlayback() {
+        playbackRequestID = UUID()
         player?.pause()
         isPlaying = false
         isSeekingBeforePlay = false
@@ -89,6 +145,8 @@ public final class AudioPlaybackController {
     }
 
     public func play(segment: LearningSegment) {
+        playbackRequestID = UUID()
+        let requestID = playbackRequestID
         guard prepareForPlayback(), let player else { return }
         pendingResumeSeekTime = nil
         activeSequence = segment.sequence
@@ -99,7 +157,7 @@ public final class AudioPlaybackController {
         let time = CMTime(seconds: target, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.playbackRequestID == requestID else { return }
                 self.isSeekingBeforePlay = false
                 guard finished else { return }
                 self.player?.playImmediately(atRate: self.playbackRate)
@@ -109,6 +167,8 @@ public final class AudioPlaybackController {
     }
 
     public func seek(to time: TimeInterval) {
+        playbackRequestID = UUID()
+        isSeekingBeforePlay = false
         // User-driven seeks (scrub / skip callers) cancel a stashed lock-resume seek.
         pendingResumeSeekTime = nil
         seekInternal(to: time)
@@ -131,6 +191,8 @@ public final class AudioPlaybackController {
     }
 
     private func beginPlayback() {
+        playbackRequestID = UUID()
+        let requestID = playbackRequestID
         guard prepareForPlayback(), let player else { return }
 
         if let resumeTime = pendingResumeSeekTime {
@@ -142,7 +204,7 @@ public final class AudioPlaybackController {
             let time = CMTime(seconds: target, preferredTimescale: 600)
             player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.playbackRequestID == requestID else { return }
                     self.isSeekingBeforePlay = false
                     guard finished else { return }
                     // Re-activate the session immediately before play; unlock can leave it inactive.
@@ -212,6 +274,16 @@ public final class AudioPlaybackController {
         return true
     }
 
+    private func validateSource(_ source: AudioPlaybackSource) -> Bool {
+        switch source {
+        case .localFile(let url):
+            return validateAudioFile(url)
+        case .remote(let url, _):
+            // Remote sources only check HTTPS + host policy; never FileManager.exists.
+            return validateRemoteURL(url)
+        }
+    }
+
     private func validateAudioFile(_ audioURL: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: audioURL.fileSystemPath) else {
             errorMessage = PlayerKitL10n.string("error.audio_file_missing", fallback: "The local audio file is missing. Generate bilingual subtitles again.")
@@ -227,16 +299,25 @@ public final class AudioPlaybackController {
         return true
     }
 
+    private func validateRemoteURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https" else {
+            errorMessage = PlayerKitL10n.string("error.audio_remote_not_https", fallback: "The remote audio address is not a secure HTTPS address.")
+            isPlaying = false
+            return false
+        }
+        guard remoteHostPolicy.allows(url) else {
+            errorMessage = PlayerKitL10n.string("error.audio_remote_host_not_allowed", fallback: "The remote audio host is not allowed for playback.")
+            isPlaying = false
+            return false
+        }
+        return true
+    }
+
     private func observe(_ item: AVPlayerItem) {
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in
-                guard let self else { return }
-                if item.status == .failed {
-                    let detail = item.error?.localizedDescription
-                        ?? PlayerKitL10n.string("error.unknown_detail", fallback: "Unknown error")
-                    self.errorMessage = PlayerKitL10n.format("error.audio_load_failed_detail", fallback: "Audio could not be loaded.\nDetails: %@", detail)
-                    self.isPlaying = false
-                }
+                guard let self, item.status == .failed, self.player?.currentItem === item else { return }
+                self.handleItemFailure(item.error)
             }
         }
         itemDurationObservation = item.observe(\.duration, options: [.initial, .new]) { [weak self] item, _ in
@@ -244,20 +325,47 @@ public final class AudioPlaybackController {
             guard mediaDuration.isFinite, mediaDuration > 0 else { return }
             Task { @MainActor in
                 guard let self, self.player?.currentItem === item else { return }
-                self.duration = mediaDuration
-                if let requestedInitialTime = self.requestedInitialTime {
-                    self.requestedInitialTime = nil
-                    // Restoration seek must not cancel a prepareResume() stashed after load().
-                    self.seekInternal(to: requestedInitialTime)
-                    if let pending = self.pendingResumeSeekTime {
-                        self.prepareResume(at: min(pending, mediaDuration))
-                    }
-                } else if self.currentTime > mediaDuration {
-                    self.seekInternal(to: mediaDuration)
-                } else if let pending = self.pendingResumeSeekTime, pending > mediaDuration {
-                    self.prepareResume(at: mediaDuration)
-                }
+                self.applyDiscoveredDuration(mediaDuration)
             }
+        }
+    }
+
+    /// Handles a failed current item. Internal (not private) so tests can
+    /// simulate remote-item failures that KVO cannot produce deterministically.
+    func handleItemFailure(_ error: Error?) {
+        let detail = error?.localizedDescription
+            ?? PlayerKitL10n.string("error.unknown_detail", fallback: "Unknown error")
+        if AudioPlaybackFailureClassifier.isOffline(error) {
+            // Offline with no local copy surfaces as a playback error only;
+            // subtitle-generation state is never touched here.
+            errorMessage = PlayerKitL10n.format("error.audio_offline_detail", fallback: "The network is unavailable and there is no local audio copy.\nDetails: %@", detail)
+        } else {
+            errorMessage = PlayerKitL10n.format("error.audio_load_failed_detail", fallback: "Audio could not be loaded.\nDetails: %@", detail)
+        }
+        isPlaying = false
+        // Remote 401/403/failure: signal the app to refresh the signed source
+        // (deduplicated: at most once per swapped-in item).
+        if let source = currentSource, source.isRemote, !refreshRequestedForCurrentItem {
+            refreshRequestedForCurrentItem = true
+            onSourceRefreshRequired?(source)
+        }
+    }
+
+    /// Applies a late-arriving media duration over the transcript-inferred one.
+    /// Internal (not private) so tests can drive it directly.
+    func applyDiscoveredDuration(_ mediaDuration: TimeInterval) {
+        duration = mediaDuration
+        if let requested = requestedInitialTime {
+            requestedInitialTime = nil
+            // Restoration seek must not cancel a prepareResume() stashed after load().
+            seekInternal(to: requested)
+            if let pending = pendingResumeSeekTime {
+                prepareResume(at: min(pending, mediaDuration))
+            }
+        } else if currentTime > mediaDuration {
+            seekInternal(to: mediaDuration)
+        } else if let pending = pendingResumeSeekTime, pending > mediaDuration {
+            prepareResume(at: mediaDuration)
         }
     }
 

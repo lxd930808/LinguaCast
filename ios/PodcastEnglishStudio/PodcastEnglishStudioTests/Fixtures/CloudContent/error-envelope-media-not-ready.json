@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "MEDIA_NOT_READY",
+    "message": "video media is still being promoted",
+    "retryable": true,
+    "retryAfterSeconds": 8,
+    "traceId": "tr_01JFXMEDIA409NOTREADY"
+  }
+}

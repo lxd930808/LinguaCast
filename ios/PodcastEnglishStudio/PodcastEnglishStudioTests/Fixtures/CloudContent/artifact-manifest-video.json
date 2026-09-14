@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "pipelineVersion": "v10.1",
+  "jobId": "cj_01JFX9L8M2N4P6Q8R0T2V4X6ZB",
+  "contentType": "video",
+  "contentKey": "video:youtube:dQw4w9WgXcQ",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "fast",
+  "generatedAt": "2026-08-28T03:04:10Z",
+  "audioFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "sourceFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "audio": {
+    "mimeType": "audio/mpeg",
+    "bytes": 3407872,
+    "durationSeconds": 212.4,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "transcoded": true
+  },
+  "files": [
+    {
+      "name": "segments.json",
+      "role": "segments",
+      "required": true,
+      "status": "ready",
+      "mimeType": "application/json",
+      "bytes": 20411,
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "etag": "\"seg-01JFX9L8M2\""
+    },
+    {
+      "name": "source.vtt",
+      "role": "sourceVtt",
+      "required": true,
+      "status": "ready",
+      "mimeType": "text/vtt",
+      "bytes": 6021,
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "etag": "\"vtt-src-01JFX9L8M2\""
+    },
+    {
+      "name": "target.vtt",
+      "role": "targetVtt",
+      "required": true,
+      "status": "ready",
+      "mimeType": "text/vtt",
+      "bytes": 5880,
+      "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "etag": "\"vtt-tgt-01JFX9L8M2\""
+    }
+  ]
+}

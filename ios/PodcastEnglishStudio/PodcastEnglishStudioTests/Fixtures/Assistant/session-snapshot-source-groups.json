@@ -1,0 +1,143 @@
+{
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "title": "AI and accounting",
+  "phase": "report_ready",
+  "outputLanguage": "zh-Hans",
+  "storefront": "US",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "createdAt": "2026-08-31T01:00:00Z",
+  "updatedAt": "2026-08-31T02:08:00Z",
+  "messages": [
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC0",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "role": "user",
+      "markdown": "Find English podcasts and videos about AI impact on accounting",
+      "createdAt": "2026-08-31T01:00:01Z"
+    },
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC1",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "role": "assistant",
+      "markdown": "## Theme\nSearch metadata only. No full transcripts were read.",
+      "createdAt": "2026-08-31T01:08:00Z"
+    },
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC2",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB1",
+      "role": "user",
+      "markdown": "Also look at audit sampling",
+      "createdAt": "2026-08-31T02:00:01Z"
+    },
+    {
+      "messageId": "am_01ARZ3NDEKTSV4RRFFQ69G5FC3",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB1",
+      "role": "assistant",
+      "markdown": "Updated recommendations after the follow-up search.",
+      "createdAt": "2026-08-31T02:08:00Z"
+    }
+  ],
+  "report": {
+    "title": "Audit sampling follow-up",
+    "summary": "A later round that still recommends the original video plus a podcast episode.",
+    "stage": "metadata",
+    "markdown": "## Overview\nThe original video remains relevant.\n\n## Limits\nThis report is based on titles and descriptions only.",
+    "sources": [
+      {
+        "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+        "ordinal": 1,
+        "reason": "Still the closest video match."
+      },
+      {
+        "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+        "ordinal": 2,
+        "reason": "Episode description mentions audit sampling with models."
+      }
+    ],
+    "createdAt": "2026-08-31T02:08:00Z"
+  },
+  "sourceGroups": [
+    {
+      "reportId": "rp_accounting02",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB1",
+      "title": "Audit sampling follow-up",
+      "createdAt": "2026-08-31T02:08:00Z",
+      "sources": [
+        {
+          "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+          "ordinal": 1,
+          "reason": "Still the closest video match."
+        },
+        {
+          "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+          "ordinal": 2,
+          "reason": "Episode description mentions audit sampling with models."
+        }
+      ]
+    },
+    {
+      "reportId": "rp_accounting01",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "title": "AI and accounting",
+      "createdAt": "2026-08-31T01:08:00Z",
+      "sources": [
+        {
+          "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD1",
+          "ordinal": 2,
+          "reason": "First-round show that was not repeated later."
+        }
+      ]
+    }
+  ],
+  "searchResults": [
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+      "platform": "youtube",
+      "sourceType": "video",
+      "sourceId": "dQw4w9WgXcQ",
+      "canonicalURL": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "title": "How AI is changing accounting",
+      "publisher": "Example Channel",
+      "publishedAt": "2026-07-01T12:00:00Z",
+      "durationSeconds": 812,
+      "provider": "ytdlp",
+      "fallback": false,
+      "deepResearchAvailability": "available"
+    },
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD1",
+      "platform": "apple_podcasts",
+      "sourceType": "podcast_show",
+      "sourceId": "show-ai-accounting",
+      "canonicalURL": "https://podcasts.apple.com/us/podcast/id1234567890",
+      "feedURL": "https://feeds.example.com/accounting.xml",
+      "title": "Accounting Today",
+      "publisher": "Example Media",
+      "provider": "rss",
+      "fallback": false,
+      "deepResearchAvailability": "unavailable"
+    },
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+      "platform": "apple_podcasts",
+      "sourceType": "podcast_episode",
+      "sourceId": "ep-ai-ledger-2026",
+      "canonicalURL": "https://podcasts.apple.com/us/podcast/id1234567890?i=1000123456789",
+      "feedURL": "https://feeds.example.com/accounting.xml",
+      "title": "AI and the ledger",
+      "publisher": "Example Media",
+      "publishedAt": "2026-06-15T08:00:00Z",
+      "durationSeconds": 2460,
+      "provider": "rss",
+      "fallback": false,
+      "deepResearchAvailability": "available"
+    }
+  ],
+  "binding": null,
+  "activeTurn": null
+}

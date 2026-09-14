@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "TRANSCRIPT_NOT_READY",
+    "message": "Transcript is not ready",
+    "retryable": true,
+    "retryAfterSeconds": 5,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ70",
+    "params": {}
+  }
+}

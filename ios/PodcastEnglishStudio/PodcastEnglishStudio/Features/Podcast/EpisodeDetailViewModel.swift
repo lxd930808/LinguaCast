@@ -3,6 +3,7 @@ import SwiftUI
 import PodcastEnglishStudioCore
 import DomainModels
 import CloudSyncKit
+import PlayerKit
 
 enum ASRProgressText {
     private static let topLevelCodes: Set<String> = [
@@ -13,7 +14,13 @@ enum ASRProgressText {
         "segment_source",
         "translate",
         "build_learning_pack",
-        "completed"
+        "completed",
+        // V10 cloud stages (WP11) projected onto the local step vocabulary.
+        "cloud_validate",
+        "cloud_prepare",
+        "cloud_processing",
+        "refine_subtitles",
+        "package"
     ]
 
     static func display(message: String?, fallback: String) -> String {
@@ -75,13 +82,12 @@ extension EpisodeDetailView {
     }
 
     var segmentUnavailableView: some View {
-        ContentUnavailableView {
-            Label(L10n.string("episode_detail.failed_to_read_bilingual_subtitles", fallback: "Failed to read bilingual subtitles"), systemImage: "exclamationmark.triangle")
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("subtitle.error-state")
-        } description: {
-            Text(segmentLoadError ?? L10n.string("episode_detail.please_go_back_and_re_enter_this_episode", fallback: "Please go back and re-enter this episode."))
-        }
+        LinguaEmptyState(
+            L10n.string("episode_detail.failed_to_read_bilingual_subtitles", fallback: "Failed to read bilingual subtitles"),
+            systemImage: "exclamationmark.triangle",
+            description: Text((segmentLoadError.map { $0 + "\n" } ?? "") + L10n.string("episode_detail.please_go_back_and_re_enter_this_episode", fallback: "Please go back and re-enter this episode.")),
+            kind: .failure
+        )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("subtitle.error-state")
     }
@@ -95,16 +101,20 @@ extension EpisodeDetailView {
                         .foregroundStyle(.secondary)
                     Text(L10n.string("episode_detail.generating_bilingual_subtitles", fallback: "Generating bilingual subtitles"))
                         .font(.title2.bold())
-                    Text(progressMessage)
+                    PodcastGenerationProgressView(episode: episode, showsBar: false)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    ProgressView(value: progressValue)
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 260)
-                    Text(verbatim: "\(progressValue.formatted(.percent.precision(.fractionLength(0)))) · \(progressStepTitle)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    PodcastPipelineStageRail(step: episode.pipelineStep)
+                        .frame(maxWidth: 360)
+                    if cloudAudioReadyHint != nil {
+                        Label(cloudAudioReadyHint ?? "", systemImage: "waveform.circle.fill")
+                            .font(.callout)
+                            .foregroundStyle(LinguaTheme.success)
+                            .accessibilityIdentifier("podcast.cloud-audio-ready")
+                    }
+                    cloudLastUpdatedText
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                     Button {
                         runner.retry(episode: episode, context: modelContext, configuration: settings.configuration)
                     } label: {
@@ -140,7 +150,7 @@ extension EpisodeDetailView {
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("subtitle.error-state")
                 } description: {
-                    Text(episode.errorMessage ?? progressMessage)
+                    Text(cloudAwareErrorMessage ?? progressMessage)
                 } actions: {
                     if cloudCheckRequired {
                         Button {
@@ -161,7 +171,7 @@ extension EpisodeDetailView {
                         }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("subtitle.cloud-bypass")
-                    } else if processingAction == .retry {
+                    } else if processingAction == .retry && cloudGenerationState.retryable {
                         Button {
                             runner.retry(episode: episode, context: modelContext, configuration: settings.configuration)
                         } label: {
@@ -185,6 +195,33 @@ extension EpisodeDetailView {
                         }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("podcast.clear-and-regenerate")
+                    } else if processingAction == .retry {
+                        // Cloud backend reported a non-retryable failure (WP14):
+                        // direct retry is pointless; offer explicit regeneration.
+                        Text(L10n.string(
+                            "cloud.error.not_retryable",
+                            fallback: "This failure cannot be retried directly. Use Clear and regenerate to start over."
+                        ))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("podcast.cloud-not-retryable")
+                        Button {
+                            Task {
+                                await runner.clearAndRegenerate(
+                                    episode: episode,
+                                    context: modelContext,
+                                    configuration: settings.configuration
+                                )
+                            }
+                        } label: {
+                            Label(
+                                L10n.string("episodes.clear_and_regenerate", fallback: "Clear and regenerate"),
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("podcast.clear-and-regenerate")
                     } else if processingAction == .openSettings {
                         Button(action: openSettingsAndDismiss) {
                             Label(L10n.string("episode_detail.go_to_settings", fallback: "Go to Settings"), systemImage: "gearshape")
@@ -205,7 +242,7 @@ extension EpisodeDetailView {
             Image(systemName: "waveform.circle")
                 .font(.system(size: 48, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text(L10n.string("episode_detail.ready_to_process", fallback: "Ready to process"))
+            Text(queuedStateTitle)
                 .font(.title2.bold())
             Text(episode.showTitle)
                 .font(.headline)
@@ -237,8 +274,11 @@ extension EpisodeDetailView {
     }
 
     private var podcastConfigurationChecklist: some View {
+        // The cloud backend needs no on-device generation keys; the Settings page
+        // owns the cloud service configuration state (WP14).
         VStack(alignment: .leading, spacing: 8) {
-            configurationRequirement(
+            if !cloudGenerationSelected {
+                configurationRequirement(
                 L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"),
                 isReady: settings.configuration.hasDashScopeASRKey
             )
@@ -246,6 +286,7 @@ extension EpisodeDetailView {
                 L10n.string("settings.translation_api_key", fallback: "Translation API Key"),
                 isReady: settings.configuration.hasTranslationKey
             )
+            }
         }
         .font(.caption)
     }
@@ -259,9 +300,21 @@ extension EpisodeDetailView {
     var processingAction: PodcastEpisodeProcessingAction {
         PodcastEpisodeProcessingPolicy.action(
             status: episode.status,
-            hasGenerationKeys: settings.configuration.hasRequiredGenerationKeys,
+            // Cloud generation (V10) needs no local DashScope/translation keys.
+            hasGenerationKeys: settings.configuration.hasRequiredGenerationKeys || cloudGenerationReady,
             allowsCloudLookup: true
         )
+    }
+
+    /// True when the cloud backend is selected and fully configured (WP11).
+    var cloudGenerationReady: Bool {
+        settings.configuration.generationBackendMode == .cloud
+            && settings.configuration.isCloudGenerationUsable
+    }
+
+    /// True when the cloud backend is selected, regardless of configuration state.
+    var cloudGenerationSelected: Bool {
+        settings.configuration.generationBackendMode == .cloud
     }
 
     var cloudCheckRequired: Bool {
@@ -283,8 +336,19 @@ extension EpisodeDetailView {
     }
 
     func openSettingsAndDismiss() {
+        settingsNavigation.open(settingsDestinationForFailure)
         dismiss()
         onOpenSettings()
+    }
+
+    private var settingsDestinationForFailure: SettingsDestination {
+        if cloudGenerationSelected {
+            return .cloudService
+        }
+        if !settings.configuration.hasRequiredGenerationKeys {
+            return .setupProgress
+        }
+        return .root
     }
 
     var progressValue: Double {
@@ -292,17 +356,7 @@ extension EpisodeDetailView {
     }
 
     var progressStepTitle: String {
-        switch episode.pipelineStep {
-        case "cloud_check": L10n.string("cloud.status.starting", fallback: "Checking iCloud")
-        case "download": L10n.string("pipeline.step.download", fallback: "Downloading Audio")
-        case "oss_upload": L10n.string("pipeline.step.upload", fallback: "Uploading Audio")
-        case "transcribe": L10n.string("pipeline.step.transcribe", fallback: "Transcribing Audio")
-        case "segment_source": L10n.string("pipeline.step.segment_source", fallback: "Optimizing Subtitle Breaks")
-        case "translate": L10n.string("pipeline.step.translate", fallback: "Translating Subtitles")
-        case "build_learning_pack": L10n.string("pipeline.step.build", fallback: "Building Subtitles")
-        case "completed": L10n.string("pipeline.step.completed", fallback: "Completed")
-        default: L10n.string("pipeline.step.preparing", fallback: "Preparing")
-        }
+        PipelineStepTitle.display(episode.pipelineStep)
     }
 
     private var progressMessage: String {
@@ -323,6 +377,124 @@ extension EpisodeDetailView {
         case "completed": 1.0
         default: 0.05
         }
+    }
+
+    // MARK: - Cloud generation state (V10 / WP14)
+
+    /// Shared observable cloud state for this episode (WP14 task 1). Merges
+    /// the episode's display fields with the persisted remote-job snapshot.
+    var cloudGenerationState: CloudContentGenerationState {
+        CloudContentGenerationState.podcast(
+            episode: episode,
+            snapshot: cloudJobSnapshot,
+            cloudSelected: cloudGenerationSelected
+        )
+    }
+
+    /// Refreshes the cached remote-job snapshot. Read-only; called on appear
+    /// and whenever the episode record changes (each poll updates it). The
+    /// main-context record wins (UITest fixtures and WP13-written records);
+    /// production podcast jobs live in WP11's dedicated store.
+    func refreshCloudJobSnapshot() {
+        // Assistant-prepared episodes always live on V10. Look up the job
+        // whenever credentials exist, even if the default backend is local.
+        guard settings.configuration.isCloudGenerationUsable else {
+            cloudJobSnapshot = nil
+            return
+        }
+        let target = settings.configuration.translationTarget
+        let quality = CloudTranslationQuality(rawValue: settings.configuration.translationQuality.rawValue)
+            ?? .quality
+        let contentKey = cloudSnapshotContentKey()
+
+        let kind = CloudContentType.podcastEpisode.rawValue
+        let records = (try? modelContext.fetch(FetchDescriptor<RemoteContentJobRecord>())) ?? []
+        let localMatches = records.filter {
+            $0.contentKind == kind
+                && $0.contentKey == contentKey
+                && $0.targetLanguage == target.rawValue
+                && $0.translationQuality == quality.rawValue
+        }
+        if let latest = localMatches.max(by: { $0.updatedAt < $1.updatedAt }) {
+            cloudJobSnapshot = CloudRemoteJobSnapshot(record: latest)
+            return
+        }
+
+        if remoteJobStore == nil {
+            remoteJobStore = try? RemoteContentJobStore()
+        }
+        if let record = remoteJobStore?.latestRecord(
+            contentKey: contentKey,
+            targetLanguage: target.rawValue,
+            quality: quality.rawValue
+        ) {
+            cloudJobSnapshot = CloudRemoteJobSnapshot(record: record)
+        } else {
+            cloudJobSnapshot = nil
+        }
+    }
+
+    /// Content key per docs/contracts/content-keys-v1 §1.1 — mirrors the
+    /// PipelineRunner submit/reconcile computation (normalized feed identity
+    /// + episode GUID, enclosure host+path fallback).
+    private func cloudSnapshotContentKey() -> String {
+        let subscription = podcastSubscriptions.first { $0.id == episode.subscriptionID }
+        let identity = CloudContentKeyPolicy.podcastFeedIdentity(
+            subscriptionFeedURL: subscription?.feedURL ?? subscription?.showURL,
+            assistantFeedURL: episode.assistantFeedURL,
+            enclosureURL: episode.enclosureURL
+        )
+        return CloudContentKeyPolicy.podcastContentKey(
+            feedURL: identity,
+            episodeGUID: episode.episodeGUID
+        )
+    }
+
+    /// Queued page title: a submitted cloud job waiting on the server shows
+    /// the cloud queue state; otherwise the legacy "ready to process".
+    var queuedStateTitle: String {
+        if cloudGenerationSelected, cloudJobSnapshot?.statusRaw == "queued" {
+            return L10n.string("cloud.stage.queued", fallback: "Queued on the server")
+        }
+        return L10n.string("episode_detail.ready_to_process", fallback: "Ready to process")
+    }
+
+    /// tvOS shelf title: keeps the legacy "Not processed" wording unless the
+    /// cloud backend reports a server-side queued job.
+    var tvQueuedStateTitle: String {
+        if cloudGenerationSelected, cloudJobSnapshot?.statusRaw == "queued" {
+            return L10n.string("cloud.stage.queued", fallback: "Queued on the server")
+        }
+        return L10n.string("episodes.queuing", fallback: "Not processed")
+    }
+
+    /// Audio-ready-first hint: the cloud job finished the audio while the
+    /// subtitles are still generating (WP14 task 2).
+    var cloudAudioReadyHint: String? {
+        let state = cloudGenerationState
+        guard cloudGenerationSelected, state.audioReady, !state.subtitlesReady else { return nil }
+        return L10n.string(
+            "cloud.audio_ready",
+            fallback: "Audio is ready. Bilingual subtitles are still being generated."
+        )
+    }
+
+    /// Last-update timestamp of the in-flight cloud job (WP14 task 1 field).
+    @ViewBuilder
+    var cloudLastUpdatedText: some View {
+        if cloudGenerationSelected, let lastUpdated = cloudGenerationState.lastUpdated {
+            Text(L10n.format(
+                "cloud.last_updated",
+                fallback: "Last updated %@",
+                lastUpdated.formatted(date: .omitted, time: .shortened)
+            ))
+        }
+    }
+
+    /// Failure text with cloud error codes localized at display time (WP14);
+    /// legacy free-form local errors pass through unchanged.
+    var cloudAwareErrorMessage: String? {
+        CloudErrorMessagePresenter.display(episode.errorMessage)
     }
 
     // MARK: - Subtitle loading
@@ -452,10 +624,45 @@ extension EpisodeDetailView {
     // MARK: - Audio wiring and repair
 
     func loadAudioForPlayback() async {
+        // Cloud first: a previous failed repair may have saved an HTML episode
+        // page as source.mp3. That file is non-empty, so the local path would
+        // otherwise win and AVPlayer would fail with an operation-stopped error.
+        if await loadRemoteAudioFromCloudJob() {
+            return
+        }
         if loadExistingAudioForPlayback() {
             return
         }
         await repairMissingAudio()
+    }
+
+    /// Cloud mode (WP12 glue wiring, WP14): when the remote job's audio is
+    /// ready but the local file is missing, stream the signed URL instead of
+    /// re-downloading from the enclosure. Falls back to the legacy repair
+    /// path when no remote source is available.
+    private func loadRemoteAudioFromCloudJob() async -> Bool {
+        guard settings.configuration.isCloudGenerationUsable,
+              let snapshot = cloudJobSnapshot,
+              snapshot.audioReady,
+              let client = CloudContentGatewayFactory.makeClient(configuration: settings.configuration)
+        else { return false }
+        let resolver = EpisodeAudioRemotePlayback.makeSourceResolver(
+            client: client,
+            jobID: snapshot.jobID
+        )
+        do {
+            let source = try await resolver.resolve(preferredLocalFile: nil)
+            player.load(source: source, segments: segments, initialTime: episode.playbackPositionSeconds)
+            EpisodeAudioRemotePlayback.installSourceRefreshHandling(
+                on: player,
+                resolver: resolver
+            ) { [weak player] error in
+                player?.errorMessage = CloudErrorMessagePresenter.display(error.localizedDescription)
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func loadExistingAudioForPlayback() -> Bool {
@@ -479,6 +686,13 @@ extension EpisodeDetailView {
 
     private func repairMissingAudio() async {
         guard !isRepairingAudio else { return }
+        guard LocalAudioProbe.isPlayableEnclosureURL(episode.enclosureURL) else {
+            player.errorMessage = L10n.string(
+                "episode_detail.local_audio_is_missing_and_the_program_audio_address_is_invalid",
+                fallback: "Local audio is missing and the program audio address is invalid. Please regenerate bilingual subtitles."
+            )
+            return
+        }
         guard let remoteURL = URL(string: episode.enclosureURL) else {
             player.errorMessage = L10n.string("episode_detail.local_audio_is_missing_and_the_program_audio_address_is_invalid", fallback: "Local audio is missing and the program audio address is invalid. Please regenerate bilingual subtitles.")
             return
@@ -521,7 +735,7 @@ extension EpisodeDetailView {
 
     // MARK: - Playback progress persistence
 
-    func persistPlaybackProgress(_ currentTime: TimeInterval, force: Bool = false) {
+    func persistPlaybackProgress(_ currentTime: TimeInterval, force: Bool = false, allowCompletion: Bool = true) {
         let now = Date()
         guard let position = PlaybackProgressPolicy.positionToPersist(
             currentTime: currentTime,
@@ -532,7 +746,7 @@ extension EpisodeDetailView {
         ) else { return }
         episode.playbackPositionSeconds = position
         episode.playbackUpdatedAt = now
-        markCompletedIfThresholdReached(position: position, now: now)
+        if allowCompletion { markCompletedIfThresholdReached(position: position, now: now) }
         episode.updatedAt = now
         lastPersistedPlaybackTime = position
         lastPersistedPlaybackAt = now
@@ -591,6 +805,14 @@ extension EpisodeDetailView {
               values.isRegularFile == true,
               (values.fileSize ?? 0) > 0
         else {
+            return false
+        }
+        guard LocalAudioProbe.looksLikeAudioFile(url) else {
+            try? FileManager.default.removeItem(at: url)
+            if episode.localAudioPath == url.fileSystemPath {
+                episode.localAudioPath = nil
+                try? modelContext.save()
+            }
             return false
         }
         return true

@@ -1,0 +1,9 @@
+{
+  "url": "https://r2.example.com/linguacast/content-pipeline/prod/podcast-audio/a1b2c3d4.mp3?X-Amz-Signature=REDACTED-EXAMPLE",
+  "expiresAt": "2026-08-28T03:00:00Z",
+  "mimeType": "audio/mpeg",
+  "bytes": 28901376,
+  "durationSeconds": 1804.5,
+  "sha256": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90",
+  "acceptRanges": "bytes"
+}

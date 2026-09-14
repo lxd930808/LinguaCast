@@ -1,0 +1,102 @@
+{
+  "events": [
+    {
+      "id": "1",
+      "event": "turn.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 1,
+        "sequence": 1,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.started",
+        "occurredAt": "2026-09-03T01:00:02Z",
+        "payload": {
+          "mode": "research"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "event": "workspace.created",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 2,
+        "sequence": 2,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "workspace.created",
+        "occurredAt": "2026-09-03T01:00:03Z",
+        "payload": {
+          "workspaceStatus": "ready"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "event": "source.saved",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 3,
+        "sequence": 3,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "source.saved",
+        "occurredAt": "2026-09-03T01:01:00Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD1",
+          "kind": "youtube_search"
+        }
+      }
+    },
+    {
+      "id": "4",
+      "event": "report.delta",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 4,
+        "sequence": 4,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "report.delta",
+        "occurredAt": "2026-09-03T01:07:00Z",
+        "payload": {
+          "text": "## Theme\n"
+        }
+      }
+    },
+    {
+      "id": "5",
+      "event": "report.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 5,
+        "sequence": 5,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "report.completed",
+        "occurredAt": "2026-09-03T01:08:00Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD5",
+          "citationCount": 4
+        }
+      }
+    },
+    {
+      "id": "6",
+      "event": "turn.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 6,
+        "sequence": 6,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.completed",
+        "occurredAt": "2026-09-03T01:08:01Z",
+        "payload": {
+          "status": "completed"
+        }
+      }
+    }
+  ]
+}

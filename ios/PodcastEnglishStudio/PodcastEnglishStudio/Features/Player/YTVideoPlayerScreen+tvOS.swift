@@ -473,11 +473,7 @@ private struct TVSubtitleActionsOverlay: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     if let progress {
-                        ProgressView(value: progressValue(for: progress))
-                            .progressViewStyle(.linear)
-                        Text(verbatim: "\(progress.translatedCount)/\(progress.totalCount)")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                        LinguaProgressBar(value: progressValue(for: progress))
                     }
                 }
 

@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "MEDIA_NOT_FOUND",
+    "message": "no ready video media for contentKey",
+    "retryable": false,
+    "traceId": "tr_01JFXMEDIA404NOTFOUND"
+  }
+}

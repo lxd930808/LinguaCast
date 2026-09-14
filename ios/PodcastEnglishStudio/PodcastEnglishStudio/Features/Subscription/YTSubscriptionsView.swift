@@ -23,7 +23,7 @@ struct YTSubscriptionsView: View {
             if let channel = channel(for: route.channelID) {
                 YTChannelDetailView(channel: channel)
             } else {
-                ContentUnavailableView(L10n.string("common.channel_does_not_exist", fallback: "Channel does not exist"), systemImage: "play.rectangle")
+                LinguaEmptyState(L10n.string("common.channel_does_not_exist", fallback: "Channel does not exist"), systemImage: "play.rectangle", kind: .failure)
             }
         }
         #endif
@@ -56,7 +56,7 @@ struct YTSubscriptionsView: View {
                     ProgressView()
                 }
                 if channels.isEmpty && !isLoading {
-                    ContentUnavailableView(L10n.string("common.there_is_no_youtube_channel_yet", fallback: "There is no YouTube channel yet"), systemImage: "play.rectangle")
+                    LinguaEmptyState(L10n.string("common.there_is_no_youtube_channel_yet", fallback: "There is no YouTube channel yet"), systemImage: "play.rectangle", kind: .guidance)
                 }
                 ForEach(visibleChannels) { channel in
                     #if os(tvOS)

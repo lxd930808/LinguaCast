@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SwiftData
 import PodcastEnglishStudioCore
 import DomainModels
@@ -214,12 +215,55 @@ final class YTLocalService {
         channel.nextVideosContinuation = hasMore ? page.continuationToken : nil
     }
 
+    /// Installs a completed V10 video job into an assistant-origin (or reused) record.
+    @MainActor
+    func installReadyAssistantCloudSubtitles(
+        video: YTVideoRecord,
+        jobID: String,
+        target: TranslationTarget,
+        configuration: AppConfiguration,
+        context: ModelContext
+    ) async throws {
+        guard let client = CloudContentGatewayFactory.makeClientIfCredentialsPresent(configuration: configuration) else {
+            throw CloudSubtitleLookupError(
+                message: "Cloud generation is enabled but the content service is not configured. [CLOUD_NOT_CONFIGURED]"
+            )
+        }
+        let taskGeneration = Self.beginSubtitleTask(videoID: video.id)
+        video.activeSubtitleTargetLanguage = target.rawValue
+        let variant = try TranslationVariantRepository.getOrCreate(
+            contentKind: .youtubeVideo,
+            contentID: video.id,
+            target: target,
+            context: context
+        )
+        let job = try await client.getJob(jobID: jobID)
+        guard job.status == .ready || job.stage == .completed else {
+            throw CloudSubtitleLookupError(
+                message: "Cloud job \(jobID) is not ready (status=\(job.status.rawValue))."
+            )
+        }
+        let contentKey = CloudContentKeyPolicy.videoContentKey(platform: "youtube", videoID: video.id)
+        _ = try await downloadAndStoreCloudArtifacts(
+            job,
+            client: client,
+            video: video,
+            target: target,
+            variant: variant,
+            taskGeneration: taskGeneration,
+            expectedContentKey: contentKey,
+            context: context,
+            onProgress: nil
+        )
+    }
+
     @MainActor
     func ensureSubtitles(
         video: YTVideoRecord,
         configuration: AppConfiguration,
         context: ModelContext,
         bypassCloudCheck: Bool = false,
+        resumeCloudJob: Bool = false,
         captionIngestionPolicy: YTCaptionIngestionPolicy = .strict,
         onProgress: (@MainActor ([LearningSegment]) -> Void)? = nil
     ) async throws -> [LearningSegment] {
@@ -341,7 +385,7 @@ final class YTLocalService {
             try? context.save()
         }
 
-        if !bypassCloudCheck {
+        if !bypassCloudCheck && !(resumeCloudJob && CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: configuration.generationBackend)) {
             switch await subtitleSync.lookup(identity: artifactIdentity) {
             case .ready(let envelope):
                 return try restoreReadyArtifact(
@@ -383,6 +427,25 @@ final class YTLocalService {
                 try? context.save()
                 throw CloudSubtitleLookupError(message: message)
             }
+        }
+
+        // V10/WP13: when the committed backend is cloud, new generation goes to
+        // the content service as a contentType=video job. Platform-caption
+        // fetching and the on-device audio ASR pipeline stay out of this path;
+        // they remain available as diagnostics/manual fallback only.
+        if CloudVideoGenerationRouting.shouldUseCloudBackend(
+            generationBackend: configuration.generationBackend
+        ) {
+            return try await ensureSubtitlesFromCloud(
+                video: video,
+                target: target,
+                variant: variant,
+                taskGeneration: taskGeneration,
+                resumeCloudJob: resumeCloudJob,
+                configuration: configuration,
+                context: context,
+                onProgress: onProgress
+            )
         }
 
         // Non-Chinese targets still require an LLM key. Simplified Chinese may
@@ -479,6 +542,404 @@ final class YTLocalService {
             try? context.save()
             throw error
         }
+    }
+
+    /// V10/WP13 cloud generation: submit (or idempotently reuse) a
+    /// contentType=video job, project server stages onto the video display
+    /// fields, then download the packaged artifacts into YTSubtitleFileStore.
+    /// Never touches YTCaptionService platform captions or LocalAudioASRPipeline.
+    @MainActor
+    private func ensureSubtitlesFromCloud(
+        video: YTVideoRecord,
+        target: TranslationTarget,
+        variant: TranslationVariantRecord,
+        taskGeneration: Int,
+        resumeCloudJob: Bool,
+        configuration: AppConfiguration,
+        context: ModelContext,
+        onProgress: (@MainActor ([LearningSegment]) -> Void)?
+    ) async throws -> [LearningSegment] {
+        guard let client = CloudContentGatewayFactory.makeClient(configuration: configuration) else {
+            let message = "Cloud generation is enabled but the content service is not configured. [CLOUD_NOT_CONFIGURED]"
+            variant.variantStatus = .failed
+            variant.errorCode = "CLOUD_NOT_CONFIGURED"
+            variant.technicalDetails = message
+            applyVariant(variant, to: video)
+            try? context.save()
+            throw CloudSubtitleLookupError(message: message)
+        }
+
+        let contentKey = CloudContentKeyPolicy.videoContentKey(platform: "youtube", videoID: video.id)
+        let request = CloudContentJobCreateRequest(
+            contentType: .video,
+            contentKey: contentKey,
+            source: CloudContentSource(
+                platform: "youtube",
+                sourceId: video.id,
+                url: video.url,
+                title: video.title
+            ),
+            sourceLanguage: "en",
+            targetLanguage: target.rawValue,
+            translationQuality: configuration.translationQuality == .fast ? .fast : .quality
+        )
+        let jobStore = YTRemoteContentJobStore(context: context, serviceURL: configuration.normalizedContentServiceBaseURL)
+        let coordinator = CloudContentJobCoordinator(client: client, store: jobStore)
+
+        variant.variantStatus = .running
+        variant.errorCode = nil
+        variant.technicalDetails = nil
+        video.sourceTranscriptMethod = "cloudASR"
+        video.sourceGenerationStep = "queued"
+        video.sourceGenerationProgress = 0
+        try? context.save()
+
+        do {
+            let submitted: CloudContentJobResponse
+            if resumeCloudJob {
+                let savedID = try await jobStore.latestJobID(for: request)
+                submitted = try await coordinator.resumeOrSubmit(request, savedJobID: savedID)
+            } else {
+                submitted = try await coordinator.submit(request)
+            }
+            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
+            let stableKey = submitted.stableKey
+            print("YTLocalService: cloud job \(submitted.jobId) for \(video.id) reused=\(submitted.reused ?? false)")
+
+            // Subscribe before the fresh fetch so a terminal transition between
+            // submit and subscribe can never be missed.
+            let updates = await coordinator.updates(for: stableKey)
+            var job = try await client.getJob(jobID: submitted.jobId)
+            try applyCloudJobProjection(
+                job,
+                expectedContentKey: contentKey,
+                expectedStableKey: stableKey,
+                video: video,
+                context: context
+            )
+            while !job.status.isTerminal {
+                var terminal: CloudContentJobResponse?
+                for await update in updates {
+                    guard CloudVideoJobUpdateGuard.shouldApply(
+                        expectedContentKey: contentKey,
+                        expectedStableKey: stableKey,
+                        incomingContentKey: update.contentKey,
+                        incomingStableKey: update.stableKey
+                    ) else { continue }
+                    try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
+                    try applyCloudJobProjection(
+                        update,
+                        expectedContentKey: contentKey,
+                        expectedStableKey: stableKey,
+                        video: video,
+                        context: context
+                    )
+                    if update.status.isTerminal {
+                        terminal = update
+                        break
+                    }
+                }
+                guard let reached = terminal else { throw CancellationError() }
+                job = reached
+            }
+
+            switch job.status {
+            case .ready:
+                return try await downloadAndStoreCloudArtifacts(
+                    job,
+                    client: client,
+                    video: video,
+                    target: target,
+                    variant: variant,
+                    taskGeneration: taskGeneration,
+                    expectedContentKey: contentKey,
+                    context: context,
+                    onProgress: onProgress
+                )
+            case .failed:
+                throw markCloudJobFailed(
+                    job.error,
+                    variant: variant,
+                    video: video,
+                    context: context
+                )
+            case .expired:
+                throw markCloudJobFailed(
+                    nil,
+                    fallbackCode: "JOB_EXPIRED",
+                    variant: variant,
+                    video: video,
+                    context: context
+                )
+            case .cancelled:
+                video.subtitleStatus = "not_requested"
+                video.sourceGenerationStep = nil
+                video.sourceGenerationProgress = nil
+                variant.variantStatus = .notRequested
+                try? context.save()
+                throw CancellationError()
+            case .queued, .running, .unknown:
+                throw CloudSubtitleLookupError(
+                    message: "Cloud subtitle generation ended in an unexpected state. [INTERNAL_ERROR]"
+                )
+            }
+
+        } catch is CancellationError {
+            // Keep the variant in .running so the next ensureSubtitles call can
+            // idempotently re-attach to the same server job.
+            video.sourceGenerationStep = nil
+            video.sourceGenerationProgress = nil
+            try? context.save()
+            throw CancellationError()
+        } catch let error as CloudSubtitleLookupError {
+            if variant.variantStatus != .failed {
+                variant.variantStatus = .failed
+                variant.errorCode = variant.errorCode ?? "cloud_generation_failed"
+                variant.technicalDetails = error.message
+                applyVariant(variant, to: video)
+                video.sourceGenerationStep = nil
+                video.sourceGenerationProgress = nil
+                try? context.save()
+            }
+            throw error
+        } catch let error as CloudContentError {
+            let code: String
+            let retryAfter = error.retryAfterSeconds
+            if case .http(_, let server) = error, let server {
+                code = server.code
+            } else {
+                code = "CLOUD_TRANSPORT_ERROR"
+            }
+            let message = Self.cloudFailureMessage(
+                code: code,
+                retryAfterSeconds: retryAfter
+            )
+            variant.variantStatus = .failed
+            variant.errorCode = code
+            variant.technicalDetails = message
+            applyVariant(variant, to: video)
+            video.sourceGenerationStep = nil
+            video.sourceGenerationProgress = nil
+            try? context.save()
+            throw CloudSubtitleLookupError(message: message)
+        } catch {
+            variant.variantStatus = .failed
+            variant.errorCode = "cloud_generation_failed"
+            variant.technicalDetails = error.localizedDescription
+            applyVariant(variant, to: video)
+            video.sourceGenerationStep = nil
+            video.sourceGenerationProgress = nil
+            try? context.save()
+            throw error
+        }
+    }
+
+    /// Projects a cloud job update onto the video display fields. The stable
+    /// key + content key captured at submit time must still match, so results
+    /// from a previous video's job can never write into the current one.
+    @MainActor
+    private func applyCloudJobProjection(
+        _ job: CloudContentJobResponse,
+        expectedContentKey: String,
+        expectedStableKey: String,
+        video: YTVideoRecord,
+        context: ModelContext
+    ) throws {
+        guard CloudVideoJobUpdateGuard.shouldApply(
+            expectedContentKey: expectedContentKey,
+            expectedStableKey: expectedStableKey,
+            incomingContentKey: job.contentKey,
+            incomingStableKey: job.stableKey
+        ) else { throw CancellationError() }
+        let projection = CloudYTProjectionPolicy.project(job)
+        video.subtitleStatus = projection.subtitleStatus
+        video.sourceGenerationStep = projection.sourceGenerationStep
+        video.sourceGenerationProgress = projection.sourceGenerationProgress
+        video.recordUpdatedAt = Date()
+        try? context.save()
+    }
+
+    /// Marks the variant failed from a terminal cloud job, surfacing stable
+    /// server codes (SOURCE_RESTRICTED, SOURCE_RATE_LIMITED,
+    /// AUDIO_DOWNLOAD_FAILED, ...). Returns the error to throw.
+    @MainActor
+    private func markCloudJobFailed(
+        _ error: CloudJobError?,
+        fallbackCode: String? = nil,
+        variant: TranslationVariantRecord,
+        video: YTVideoRecord,
+        context: ModelContext
+    ) -> CloudSubtitleLookupError {
+        let code = error?.code ?? fallbackCode ?? "INTERNAL_ERROR"
+        let message = Self.cloudFailureMessage(
+            code: code,
+            retryAfterSeconds: error?.retryAfterSeconds
+        )
+        variant.variantStatus = .failed
+        variant.errorCode = code
+        variant.technicalDetails = message
+        applyVariant(variant, to: video)
+        video.sourceGenerationStep = nil
+        video.sourceGenerationProgress = nil
+        try? context.save()
+        return CloudSubtitleLookupError(message: message)
+    }
+
+    /// Downloads the ready job's packaged artifacts (segments.json,
+    /// source.vtt, target.vtt), verifies integrity against the manifest, and
+    /// stores them via the existing YTSubtitleFileStore layout.
+    @MainActor
+    private func downloadAndStoreCloudArtifacts(
+        _ job: CloudContentJobResponse,
+        client: CloudContentJobClient,
+        video: YTVideoRecord,
+        target: TranslationTarget,
+        variant: TranslationVariantRecord,
+        taskGeneration: Int,
+        expectedContentKey: String,
+        context: ModelContext,
+        onProgress: (@MainActor ([LearningSegment]) -> Void)?
+    ) async throws -> [LearningSegment] {
+        guard let manifest = job.artifacts, manifest.isCompatibleWithClient else {
+            throw markCloudJobFailed(
+                nil,
+                fallbackCode: "PIPELINE_VERSION_UNSUPPORTED",
+                variant: variant,
+                video: video,
+                context: context
+            )
+        }
+        var refs: [String: CloudArtifactFileRef] = [:]
+        for ref in manifest.files { refs[ref.name] = ref }
+
+        let segmentsDownload = try await Self.fetchVerifiedCloudArtifact(
+            client: client, jobID: job.jobId, name: "segments.json", ref: refs["segments.json"]
+        )
+        let sourceDownload = try await Self.fetchVerifiedCloudArtifact(
+            client: client, jobID: job.jobId, name: "source.vtt", ref: refs["source.vtt"]
+        )
+        let targetDownload = try await Self.fetchVerifiedCloudArtifact(
+            client: client, jobID: job.jobId, name: "target.vtt", ref: refs["target.vtt"]
+        )
+        let envelope: CloudSegmentsArtifactEnvelope
+        do {
+            envelope = try CloudSegmentsArtifactEnvelope.decode(from: segmentsDownload.data)
+        } catch CloudSegmentsArtifactError.unsupportedSchemaVersion {
+            throw markCloudJobFailed(
+                nil,
+                fallbackCode: "PIPELINE_VERSION_UNSUPPORTED",
+                variant: variant,
+                video: video,
+                context: context
+            )
+        } catch {
+            throw markCloudJobFailed(
+                nil,
+                fallbackCode: "ARTIFACT_PUBLISH_FAILED",
+                variant: variant,
+                video: video,
+                context: context
+            )
+        }
+        let sourceVTT = String(decoding: sourceDownload.data, as: UTF8.self)
+        let targetVTT = String(decoding: targetDownload.data, as: UTF8.self)
+
+        // Final write-time race guard: the generation pass and the job identity
+        // must both still be the ones this call started with.
+        try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
+        guard CloudVideoJobUpdateGuard.shouldApply(
+            expectedContentKey: expectedContentKey,
+            expectedStableKey: job.stableKey,
+            incomingContentKey: job.contentKey,
+            incomingStableKey: job.stableKey
+        ) else { throw CancellationError() }
+
+        let files = try fileStore.files(videoID: video.id)
+        let translationFiles = try fileStore.translationFiles(videoID: video.id, target: target)
+        let segments = envelope.segments
+        try fileStore.writeVTT(sourceVTT, to: files.englishVTT)
+        try fileStore.writeSegments(sourceSegments(from: segments), to: files.baseSegments)
+        try fileStore.writeSegments(segments, to: translationFiles.segments)
+        try fileStore.writeVTT(targetVTT, to: translationFiles.targetVTT)
+
+        video.enVTTPath = files.englishVTT.fileSystemPath
+        video.sourceTranscriptMethod = "cloudASR"
+        video.sourceGenerationStep = nil
+        video.sourceGenerationProgress = nil
+        variant.segmentsPath = translationFiles.segments.fileSystemPath
+        variant.targetVTTPath = translationFiles.targetVTT.fileSystemPath
+        variant.variantStatus = .ready
+        variant.errorCode = nil
+        variant.technicalDetails = nil
+        updateSubtitleProgress(variant, translatedCount: segments.count, totalCount: segments.count)
+        applyVariant(variant, to: video)
+        try persistManifest(for: video, target: target, variant: variant, files: translationFiles)
+        try context.save()
+        try? await subtitleSync.publishReady(
+            identity: .youtube(videoID: video.id, target: target),
+            segments: segments,
+            generatedAt: variant.updatedAt
+        )
+        onProgress?(segments)
+        return segments
+    }
+
+    /// Fetches one artifact and verifies its SHA-256 against the manifest ref
+    /// when present; a mismatch is surfaced as a publish-integrity failure.
+    private static func fetchVerifiedCloudArtifact(
+        client: CloudContentJobClient,
+        jobID: String,
+        name: String,
+        ref: CloudArtifactFileRef?
+    ) async throws -> CloudContentArtifactDownload {
+        let download = try await client.fetchArtifact(jobID: jobID, fileName: name)
+        if let ref, !download.data.isEmpty {
+            let hexDigits = Array("0123456789abcdef")
+            var digestHex = ""
+            for byte in SHA256.hash(data: download.data) {
+                digestHex.append(hexDigits[Int(byte >> 4)])
+                digestHex.append(hexDigits[Int(byte & 0x0f)])
+            }
+            guard digestHex == ref.sha256 else {
+                throw CloudSubtitleLookupError(
+                    message: "Downloaded artifact failed integrity verification. [ARTIFACT_PUBLISH_FAILED]"
+                )
+            }
+        }
+        return download
+    }
+
+    /// User-facing message for a cloud failure. The stable server code is
+    /// always appended in brackets so diagnostics show SOURCE_RESTRICTED /
+    /// SOURCE_RATE_LIMITED / AUDIO_DOWNLOAD_FAILED style identifiers.
+    static func cloudFailureMessage(
+        code: String,
+        retryAfterSeconds: Int?
+    ) -> String {
+        let base: String
+        switch CloudErrorPresentationPolicy.category(forCode: code) {
+        case .sourceRestricted:
+            base = "The source platform restricts this video (region, age, or login)."
+        case .rateLimited:
+            if let retryAfterSeconds, retryAfterSeconds > 0 {
+                base = "The source platform is rate limiting requests. Try again in \(retryAfterSeconds)s."
+            } else {
+                base = "The source platform is rate limiting requests. Try again later."
+            }
+        case .sourceGone:
+            base = "This video is no longer available on the source platform."
+        case .capacity:
+            base = "The content service is at capacity. Try again later."
+        case .retryableFailure:
+            base = "Cloud subtitle generation failed; a retry may succeed."
+        case .needsUpgrade:
+            base = "Update the app to keep using the cloud content service."
+        case .fatalFailure:
+            base = "Cloud subtitle generation cannot process this video."
+        case .unknown:
+            base = "Cloud subtitle generation failed."
+        }
+        return "\(base) [\(code)]"
     }
 
     /// Whether caption failure is eligible for the iPhone audio-ASR fallback CTA.
@@ -847,6 +1308,7 @@ final class YTLocalService {
             configuration: configuration,
             context: context,
             bypassCloudCheck: bypassCloudCheck,
+            resumeCloudJob: true,
             captionIngestionPolicy: captionIngestionPolicy,
             onProgress: onProgress
         )
@@ -1737,5 +2199,107 @@ private func validateYouTubeDataHTTP(_ response: URLResponse, data: Data, contex
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+// MARK: - Cloud job persistence (V10 / WP13)
+
+/// CloudContentJobPersisting backed by SwiftData RemoteContentJobRecord. A
+/// fresh ModelContext is created per call so the coordinator can upsert from
+/// any executor. Until the app schema registers RemoteContentJobRecord
+/// (WP11/WP14 wiring), the store degrades to in-memory tracking so cloud
+/// generation keeps working; the job itself is still recoverable because the
+/// server-side create is idempotent.
+actor YTRemoteContentJobStore: CloudContentJobPersisting {
+    private static let terminalStatuses: Set<String> = ["ready", "failed", "cancelled", "expired"]
+
+    private let serviceURL: String
+    private let container: ModelContainer?
+    private var memory: [String: RemoteContentJobSnapshot] = [:]
+
+    init(context: ModelContext, serviceURL: String) {
+        self.serviceURL = serviceURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let container = context.container
+        if container.schema.entities.contains(where: { $0.name == "RemoteContentJobRecord" }) {
+            self.container = container
+        } else {
+            self.container = nil
+        }
+    }
+
+    func upsert(_ job: CloudContentJobResponse) async throws {
+        guard let container else {
+            memory[job.stableKey] = RemoteContentJobSnapshot(
+                stableKey: job.stableKey,
+                jobID: job.jobId,
+                statusRaw: job.status.rawValue,
+                isTerminal: job.status.isTerminal
+            )
+            return
+        }
+        let context = ModelContext(container)
+        let key = serviceURL + "|" + job.sourceLanguage + "|" + job.stableKey
+        var descriptor = FetchDescriptor<RemoteContentJobRecord>(
+            predicate: #Predicate { $0.stableKey == key }
+        )
+        descriptor.fetchLimit = 1
+        if let record = try context.fetch(descriptor).first {
+            record.apply(job)
+        } else {
+            let record = RemoteContentJobRecord(
+                stableKey: key,
+                contentKind: job.contentType.rawValue,
+                contentKey: job.contentKey,
+                jobID: job.jobId,
+                statusRaw: job.status.rawValue,
+                targetLanguage: job.targetLanguage,
+                translationQuality: job.translationQuality.rawValue,
+                pipelineVersion: job.pipelineVersion
+            )
+            record.apply(job)
+            context.insert(record)
+        }
+        try context.save()
+    }
+
+    func latestJobID(for request: CloudContentJobCreateRequest) async throws -> String? {
+        guard let container else { return nil }
+        let context = ModelContext(container)
+        let prefix = serviceURL + "|" + request.sourceLanguage + "|"
+        return try context.fetch(FetchDescriptor<RemoteContentJobRecord>())
+            .filter { $0.stableKey.hasPrefix(prefix) && $0.contentKind == request.contentType.rawValue
+                && $0.contentKey == request.contentKey && $0.targetLanguage == request.targetLanguage
+                && $0.translationQuality == request.translationQuality.rawValue }
+            .max { $0.updatedAt < $1.updatedAt }?.jobID
+    }
+
+    func snapshot(forStableKey key: String) async throws -> RemoteContentJobSnapshot? {
+        guard let container else { return memory[key] }
+        let context = ModelContext(container)
+        var descriptor = FetchDescriptor<RemoteContentJobRecord>(
+            predicate: #Predicate { $0.stableKey == key }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = try context.fetch(descriptor).first else { return nil }
+        return Self.snapshot(of: record)
+    }
+
+    func nonTerminalSnapshots() async throws -> [RemoteContentJobSnapshot] {
+        guard let container else {
+            return memory.values.filter { !$0.isTerminal }
+        }
+        let context = ModelContext(container)
+        return try context.fetch(FetchDescriptor<RemoteContentJobRecord>())
+            .filter { !Self.terminalStatuses.contains($0.statusRaw) }
+            .map(Self.snapshot(of:))
+    }
+
+    private static func snapshot(of record: RemoteContentJobRecord) -> RemoteContentJobSnapshot {
+        RemoteContentJobSnapshot(
+            stableKey: record.stableKey,
+            jobID: record.jobID,
+            statusRaw: record.statusRaw,
+            isTerminal: terminalStatuses.contains(record.statusRaw)
+        )
     }
 }

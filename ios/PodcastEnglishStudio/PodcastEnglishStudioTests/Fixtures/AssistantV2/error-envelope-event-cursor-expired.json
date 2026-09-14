@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "EVENT_CURSOR_EXPIRED",
+    "message": "Last-Event-ID is older than the retained event window",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {}
+  }
+}

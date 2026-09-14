@@ -1,0 +1,34 @@
+{
+  "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE1",
+  "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+  "provider": "aggregate",
+  "query": "Agent Harness interview",
+  "status": "partial",
+  "createdAt": "2026-08-31T01:11:00Z",
+  "providerStatus": [
+    {
+      "provider": "ytdlp",
+      "status": "success",
+      "latencyMs": 2100,
+      "cacheHit": false,
+      "acceptedCount": 6
+    },
+    {
+      "provider": "podcastindex",
+      "status": "unavailable",
+      "latencyMs": 10000,
+      "errorCode": "PODCASTINDEX_UNAVAILABLE",
+      "acceptedCount": 0
+    },
+    {
+      "provider": "apple_search",
+      "status": "success",
+      "latencyMs": 480,
+      "cacheHit": false,
+      "acceptedCount": 4
+    }
+  ],
+  "results": [],
+  "warnings": ["podcastindex_unavailable"]
+}

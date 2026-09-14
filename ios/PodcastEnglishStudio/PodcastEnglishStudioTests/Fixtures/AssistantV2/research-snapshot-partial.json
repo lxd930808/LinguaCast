@@ -1,0 +1,106 @@
+{
+  "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "title": "AI and accounting",
+  "phase": "ready",
+  "status": "ready",
+  "workspaceStatus": "ready",
+  "outputLanguage": "zh-Hans",
+  "storefront": "US",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "quality",
+  "activeTurnId": null,
+  "artifactCounts": {
+    "web_search": 1,
+    "web_page": 1,
+    "podcast_search": 1,
+    "youtube_search": 1,
+    "transcript": 0,
+    "research_memory": 1,
+    "report": 1
+  },
+  "grants": [
+    {
+      "alias": "notes",
+      "permission": "read",
+      "allowedExtensions": [
+        ".md",
+        ".txt"
+      ],
+      "maxFileBytes": 2097152,
+      "grantedAt": "2026-09-03T01:00:00Z",
+      "status": "ready"
+    }
+  ],
+  "createdAt": "2026-09-03T01:00:00Z",
+  "updatedAt": "2026-09-03T01:08:00Z",
+  "messages": [],
+  "artifacts": [
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD3",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "kind": "web_search",
+      "status": "ready",
+      "mediaType": "application/json",
+      "bytes": 2048,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "producer": "web_search",
+      "sourceReference": {
+        "platform": "web",
+        "sourceId": "run-web",
+        "canonicalURL": "https://example.com/search",
+        "provider": "configured_web",
+        "retrievedAt": "2026-09-03T01:08:00Z"
+      },
+      "evidenceLevel": "search_metadata",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "updatedAt": "2026-09-03T01:08:00Z"
+    },
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD2",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "kind": "podcast_search",
+      "status": "ready",
+      "mediaType": "application/json",
+      "bytes": 2048,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "producer": "search_podcasts",
+      "sourceReference": {
+        "platform": "podcast",
+        "sourceId": "1001",
+        "canonicalURL": "https://example.com/feed.xml",
+        "provider": "podcastindex",
+        "retrievedAt": "2026-09-03T01:08:00Z"
+      },
+      "evidenceLevel": "search_metadata",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "updatedAt": "2026-09-03T01:08:00Z"
+    },
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD1",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "kind": "youtube_search",
+      "status": "failed",
+      "mediaType": "application/json",
+      "bytes": 2048,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "producer": "search_youtube",
+      "sourceReference": {
+        "platform": "youtube",
+        "sourceId": "dQw4w9WgXcQ",
+        "canonicalURL": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "provider": "ytdlp",
+        "retrievedAt": "2026-09-03T01:08:00Z"
+      },
+      "evidenceLevel": "search_metadata",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "updatedAt": "2026-09-03T01:08:00Z"
+    }
+  ],
+  "memory": {
+    "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "entries": [],
+    "proposals": []
+  },
+  "latestReportArtifactId": null,
+  "activeTurn": null
+}

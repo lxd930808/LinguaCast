@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD0",
+      "platform": "youtube",
+      "sourceType": "video",
+      "sourceId": "dQw4w9WgXcQ",
+      "canonicalURL": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "feedURL": null,
+      "title": "How AI is changing accounting",
+      "publisher": "Example Channel",
+      "publishedAt": "2026-07-01T12:00:00Z",
+      "durationSeconds": 812,
+      "description": "A talk about AI tools in accounting firms.",
+      "thumbnailURL": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      "availability": "public",
+      "provider": "youtube_api",
+      "fallback": true,
+      "provenance": {
+        "title": "youtube_api",
+        "durationSeconds": "youtube_api",
+        "publishedAt": "youtube_api",
+        "fallbackReason": "ytdlp_timeout"
+      },
+      "deepResearchAvailability": "available",
+      "warnings": ["youtube_search_fell_back_to_data_api"]
+    }
+  ]
+}

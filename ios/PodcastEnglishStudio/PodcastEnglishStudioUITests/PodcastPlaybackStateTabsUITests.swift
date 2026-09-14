@@ -127,16 +127,8 @@ final class PodcastPlaybackStateTabsUITests: XCTestCase {
     }
 
     private func focusAndSelect(_ element: XCUIElement) {
-        for _ in 0..<12 where !element.hasFocus {
-            XCUIRemote.shared.press(.down)
-        }
-        for _ in 0..<8 where !element.hasFocus {
-            XCUIRemote.shared.press(.right)
-        }
-        for _ in 0..<8 where !element.hasFocus {
-            XCUIRemote.shared.press(.left)
-        }
-        XCTAssertTrue(element.hasFocus, "Expected focus on \(element.identifier.isEmpty ? element.label : element.identifier)")
+        XCTAssertTrue(XCUIApplication().moveRemoteFocus(to: element),
+            "Expected focus on \(element.identifier.isEmpty ? element.label : element.identifier)")
         XCUIRemote.shared.press(.select)
     }
     #endif

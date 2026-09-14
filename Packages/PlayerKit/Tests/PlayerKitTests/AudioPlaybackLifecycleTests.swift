@@ -83,6 +83,18 @@ final class AudioPlaybackLifecycleTests: XCTestCase {
         controller.pausePlayback()
     }
 
+    func testPauseInvalidatesAnInFlightSentenceSeek() async throws {
+        let controller = AudioPlaybackController()
+        let url = try makeSilentWAV(durationSeconds: 6)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let segment = LearningSegment(sequence: 1, startMS: 2000, endMS: 5000, text: "sentence")
+        controller.load(audioURL: url, segments: [segment])
+        controller.play(segment: segment)
+        controller.pausePlayback()
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertFalse(controller.isPlaying, "A paused seek must never restart original audio after a mode switch")
+    }
+
     private func makeSilentWAV(durationSeconds: UInt32) throws -> URL {
         let sampleRate: UInt32 = 8_000
         let sampleCount = sampleRate * durationSeconds

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "cm_01JFXB2C4E6G8J0M2P4R",
+  "contentType": "video",
+  "contentKey": "video:youtube:dQw4w9WgXcQ",
+  "url": "https://r2.example.com/linguacast/content-pipeline/prod/video-media/c0ffee12.mp4?X-Amz-Signature=REDACTED-EXAMPLE",
+  "expiresAt": "2026-08-30T12:00:00Z",
+  "mimeType": "video/mp4",
+  "bytes": 48234496,
+  "sha256": "c0ffee12aabbccddeeff00112233445566778899aabbccddeeff001122334455",
+  "durationSeconds": 212.5,
+  "height": 720,
+  "videoCodec": "avc1",
+  "audioCodec": "aac",
+  "acceptRanges": "bytes",
+  "mediaVersion": "mp4-720-avc1-aac",
+  "createdAt": "2026-08-30T10:15:00Z"
+}

@@ -123,6 +123,13 @@ public final class EpisodeRecord {
     public var playbackUpdatedAt: Date?
     public var createdAt: Date
     public var updatedAt: Date
+    /// `subscription` (default / nil) or `assistant`. Optional so SwiftData can
+    /// lightweight-migrate existing rows.
+    public var originRaw: String?
+    public var pinnedToHome: Bool = false
+    /// Feed URL captured for assistant-origin episodes so a content key can be
+    /// derived without creating a PodcastSubscription.
+    public var assistantFeedURL: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -142,7 +149,10 @@ public final class EpisodeRecord {
         status: String = "queued",
         pipelineStep: String = "discover",
         isNew: Bool = true,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        originRaw: String? = nil,
+        pinnedToHome: Bool = false,
+        assistantFeedURL: String? = nil
     ) {
         self.id = id
         self.subscriptionID = subscriptionID
@@ -166,6 +176,22 @@ public final class EpisodeRecord {
         self.isNew = isNew
         self.createdAt = createdAt
         self.updatedAt = createdAt
+        self.originRaw = originRaw
+        self.pinnedToHome = pinnedToHome
+        self.assistantFeedURL = assistantFeedURL
+    }
+
+    public var catalogOrigin: CatalogOrigin {
+        get { CatalogOrigin(stored: originRaw) }
+        set { originRaw = newValue.storedValue }
+    }
+
+    public var appearsInSubscriptionLibrary: Bool {
+        CatalogIsolationPolicy.appearsInSubscriptionLibrary(originRaw: originRaw)
+    }
+
+    public var isPinnedAssistantHomeItem: Bool {
+        CatalogIsolationPolicy.isPinnedAssistantHomeItem(originRaw: originRaw, pinnedToHome: pinnedToHome)
     }
 }
 

@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "clientArtifactSchemaVersion 3 is newer than supported version 1",
+    "retryable": false,
+    "traceId": "tr_01JFXB2C4E6G8J0M2P4R",
+    "params": {
+      "field": "clientArtifactSchemaVersion",
+      "supported": 1,
+      "requested": 3
+    }
+  }
+}

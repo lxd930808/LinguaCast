@@ -14,6 +14,57 @@ public enum KeychainError: LocalizedError {
     }
 }
 
+/// Abstraction for the V10 content service token so app code and tests do not
+/// depend on Security.framework directly.
+public protocol ContentServiceTokenStoring: Sendable {
+    func readContentServiceToken() throws -> String
+    func writeContentServiceToken(_ token: String) throws
+}
+
+public protocol AssistantServiceTokenStoring: Sendable {
+    func readAssistantServiceToken() throws -> String
+    func writeAssistantServiceToken(_ token: String) throws
+}
+
+/// In-memory token store for tests and previews.
+public final class InMemoryContentServiceTokenStore: ContentServiceTokenStoring, @unchecked Sendable {
+    private var token: String = ""
+    private let lock = NSLock()
+
+    public init() {}
+
+    public func readContentServiceToken() throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return token
+    }
+
+    public func writeContentServiceToken(_ newValue: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        token = newValue
+    }
+}
+
+public final class InMemoryAssistantServiceTokenStore: AssistantServiceTokenStoring, @unchecked Sendable {
+    private var token: String = ""
+    private let lock = NSLock()
+
+    public init() {}
+
+    public func readAssistantServiceToken() throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return token
+    }
+
+    public func writeAssistantServiceToken(_ newValue: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        token = newValue
+    }
+}
+
 public final class KeychainStore {
     // iCloud 回归重点：Keychain service 名保持不变。
     private let service = "PodcastEnglishStudio"
@@ -104,6 +155,30 @@ public final class KeychainStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
+    }
+}
+
+// KeychainStore is stateless apart from the fixed service name; all Security
+// calls are thread-safe.
+extension KeychainStore: @unchecked Sendable {}
+
+extension KeychainStore: ContentServiceTokenStoring {
+    public func readContentServiceToken() throws -> String {
+        try read(.contentServiceToken)
+    }
+
+    public func writeContentServiceToken(_ token: String) throws {
+        try write(token, for: .contentServiceToken)
+    }
+}
+
+extension KeychainStore: AssistantServiceTokenStoring {
+    public func readAssistantServiceToken() throws -> String {
+        try read(.assistantServiceToken)
+    }
+
+    public func writeAssistantServiceToken(_ token: String) throws {
+        try write(token, for: .assistantServiceToken)
     }
 }
 
@@ -216,6 +291,15 @@ public final class SettingsStore {
             }
             configuration.translationQualityMode = TranslationQualityMode.normalized(
                 storedValues[.translationQualityMode]
+            ).rawValue
+            configuration.contentServiceEnabled = Self.bool(from: storedValues[.contentServiceEnabled] ?? "")
+            configuration.contentServiceBaseURL = storedValues[.contentServiceBaseURL] ?? ""
+            configuration.contentServiceToken = storedValues[.contentServiceToken] ?? ""
+            configuration.assistantServiceEnabled = Self.bool(from: storedValues[.assistantServiceEnabled] ?? "")
+            configuration.assistantServiceBaseURL = storedValues[.assistantServiceBaseURL] ?? ""
+            configuration.assistantServiceToken = storedValues[.assistantServiceToken] ?? ""
+            configuration.generationBackend = GenerationBackend.normalized(
+                storedValues[.generationBackend] ?? ""
             ).rawValue
 
             try applySubtitlePresentationMigrationIfNeeded(

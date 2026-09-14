@@ -65,7 +65,6 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
     @State private var previousOrientation: UIInterfaceOrientation?
     @State private var fullscreenWindowScene: UIWindowScene?
     @State private var pendingOrientationRestore: UIInterfaceOrientationMask?
-    @State private var usesSettingsSheet = true
 
     var body: some View {
         GeometryReader { proxy in
@@ -106,20 +105,13 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                         .zIndex(3)
                 }
 
-                settingsOverlay(mode: mode)
-                    .zIndex(4)
             }
             .onChange(of: proxy.size) { _, size in
-                usesSettingsSheet = YTPlayerLayoutMode(
-                    size: size,
-                    isFullscreen: isAppFullscreen
-                ).isTall
                 if size.width < 32 || size.height < 32 {
                     exitFullscreen()
                 }
             }
             .onAppear {
-                usesSettingsSheet = mode.isTall
                 guard UITestSupport.isEnabled else { return }
                 let processInfo = ProcessInfo.processInfo
                 if processInfo.environment["LINGUACAST_UI_START_FULLSCREEN"] == "1"
@@ -151,24 +143,24 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
         .onDisappear {
             exitFullscreen()
         }
-        .sheet(isPresented: Binding(
-            get: { showingSettings && !isAppFullscreen && usesSettingsSheet },
-            set: { showingSettings = $0 }
-        )) {
+        .sheet(isPresented: $showingSettings) {
             settingsPanel
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
         .toolbar(isAppFullscreen ? .hidden : .visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
+                HStack {
+                    Button { showingSettings = true } label: {
+                        Image(systemName: "gearshape")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.string("ytvideo_player.settings", fallback: "Settings"))
+                    .accessibilityIdentifier("player.settings.navigation")
                 }
-                .accessibilityLabel(L10n.string("ytvideo_player.settings", fallback: "Settings"))
-                .accessibilityIdentifier("player.settings.navigation")
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -352,6 +344,8 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                     }
                 }
 
+                CloudVideoSaveRow(viewModel: viewModel, configuration: settings.configuration)
+
                 SubtitleStatusRow(video: video, subtitleState: viewModel.subtitleState)
                     .padding(14)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -401,7 +395,7 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                 activeSentenceReadingCard(context: context)
             }
         }
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(LinguaTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func activeSentenceReadingCard(context: SentencePlaybackContext) -> some View {
@@ -453,12 +447,12 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                 if video.sourceGenerationStep != nil {
                     if video.sourceGenerationStep == "downloading" {
                         if let progress = viewModel.subtitleState.audioDownloadProgress {
-                            ProgressView(value: min(max(progress, 0), 1))
+                            LinguaProgressBar(value: min(max(progress, 0), 1))
                         } else {
                             ProgressView()
                         }
                     } else {
-                        ProgressView(value: min(max(video.sourceGenerationProgress ?? 0.05, 0), 1))
+                        LinguaProgressBar(value: min(max(video.sourceGenerationProgress ?? 0.05, 0), 1))
                     }
                 }
             }
@@ -513,35 +507,6 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
             }
         )
         .frame(maxWidth: 760)
-    }
-
-    @ViewBuilder
-    private func settingsOverlay(mode: YTPlayerLayoutMode) -> some View {
-        if showingSettings && isAppFullscreen {
-            ZStack {
-                Color.black.opacity(0.58)
-                    .ignoresSafeArea()
-                    .onTapGesture { showingSettings = false }
-                settingsPanel
-                    .frame(maxWidth: 520)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .padding(32)
-            }
-            .transition(.opacity)
-            .zIndex(2_000)
-        } else if showingSettings && mode == .wideShort {
-            ZStack {
-                Color.black.opacity(0.45)
-                    .ignoresSafeArea()
-                    .onTapGesture { showingSettings = false }
-                settingsPanel
-                    .frame(maxWidth: 520)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .padding(32)
-            }
-            .transition(.opacity)
-            .zIndex(2_000)
-        }
     }
 
     private func enterFullscreen() {
@@ -614,69 +579,67 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
     }
 
     private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(L10n.string("ytvideo_player.settings", fallback: "Settings"))
-                    .font(.headline)
-                Spacer()
-                Button {
-                    showingSettings = false
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(L10n.string("common.close", fallback: "Close"))
-            }
-
-            if !isUsingIFramePlayer {
-                LabeledContent(L10n.string("ytvideo_player.quality", fallback: "Quality")) {
-                    qualityMenu
-                }
-            }
-
-            LabeledContent(L10n.string("ytvideo_player.playback_speed", fallback: "Playback speed")) {
-                playbackRateMenu
-            }
-
-            LabeledContent(L10n.string("ytvideo_player.subtitles", fallback: "subtitles")) {
-                subtitleModeMenu
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L10n.string("ytvideo_player.subtitle_translation", fallback: "Subtitle translation"))
-                    .font(.subheadline.weight(.semibold))
-                SubtitleStatusRow(video: video, subtitleState: viewModel.subtitleState)
-                if viewModel.canRetrySubtitles {
-                    Button {
-                        Task { await viewModel.retrySubtitles(settings: settings, context: modelContext) }
-                    } label: {
-                        Label(
-                            viewModel.isRetryingSubtitles
-                                ? L10n.string("ytvideo_player.retrying", fallback: "Retrying")
-                                : L10n.string("ytvideo_player.retry_subtitle_translation", fallback: "Retry subtitle translation"),
-                            systemImage: "arrow.clockwise"
-                        )
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    PlaybackSettingsSection(title: L10n.string("episode_detail.play", fallback: "Play")) {
+                        if !isUsingIFramePlayer {
+                            PlaybackSettingsRow(title: L10n.string("ytvideo_player.quality", fallback: "Quality")) { qualityMenu }
+                            Divider()
+                        }
+                        PlaybackSettingsRow(title: L10n.string("ytvideo_player.playback_speed", fallback: "Playback speed")) { playbackRateMenu }
+                        Divider()
+                        PlaybackSettingsRow(title: L10n.string("ytvideo_player.subtitles", fallback: "subtitles")) { subtitleModeMenu }
+                        Divider()
+                        PlaybackSubtitleSettingsLink()
                     }
-                    .disabled(viewModel.isRetryingSubtitles)
-                }
-                if viewModel.subtitleState.canGenerateFromAudio {
-                    Button {
-                        showingSettings = false
-                        viewModel.subtitleState.requestGenerateFromAudio()
-                    } label: {
-                        Label(
-                            L10n.string(
-                                "ytvideo_player.generate_from_audio",
-                                fallback: "Generate bilingual content from audio"
-                            ),
-                            systemImage: "waveform"
-                        )
+                    PlaybackSettingsSection(title: L10n.string("ytvideo_player.subtitle_translation", fallback: "Subtitle translation")) {
+                        SubtitleStatusRow(video: video, subtitleState: viewModel.subtitleState)
+                        if viewModel.canRetrySubtitles {
+                            Button {
+                                Task { await viewModel.retrySubtitles(settings: settings, context: modelContext) }
+                            } label: {
+                                Label(
+                                    viewModel.isRetryingSubtitles
+                                        ? L10n.string("ytvideo_player.retrying", fallback: "Retrying")
+                                        : L10n.string("ytvideo_player.retry_subtitle_translation", fallback: "Retry subtitle translation"),
+                                    systemImage: "arrow.clockwise"
+                                )
+                            }
+                            .disabled(viewModel.isRetryingSubtitles)
+                        }
+                        if viewModel.subtitleState.canGenerateFromAudio {
+                            Button {
+                                showingSettings = false
+                                viewModel.subtitleState.requestGenerateFromAudio()
+                            } label: {
+                                Label(
+                                    L10n.string(
+                                        "ytvideo_player.generate_from_audio",
+                                        fallback: "Generate bilingual content from audio"
+                                    ),
+                                    systemImage: "waveform"
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
+                }
+                .padding(20)
+            }
+            .linguaPage()
+            .navigationTitle(L10n.string("playback.settings.title", fallback: "Playback Settings"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.string("common.close", fallback: "Close")) { showingSettings = false }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("player.settings.close")
                 }
             }
         }
-        .padding(20)
+        .accessibilityIdentifier("player.settings.video-panel")
     }
 
     private var qualityMenu: some View {
@@ -824,6 +787,7 @@ private struct YTSentenceControlDock: View {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3.weight(.bold))
                     .frame(width: 52, height: 52)
+                    .contentShape(Rectangle())
                     .foregroundStyle(.white)
                     .background(LinguaTheme.accent, in: Circle())
             }
@@ -869,6 +833,7 @@ private struct YTSentenceControlDock: View {
             Image(systemName: systemName)
                 .font(.body.weight(.semibold))
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .foregroundStyle(selected ? LinguaTheme.accent : Color.primary)
         }
         .disabled(disabled)
@@ -893,6 +858,7 @@ private struct YTIFrameAppControlOverlay: View {
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .background(.black.opacity(0.58), in: Circle())
                 }
                 .accessibilityLabel(L10n.string("ytvideo_player.settings", fallback: "Settings"))
@@ -901,6 +867,7 @@ private struct YTIFrameAppControlOverlay: View {
                 Button(action: onExitFullscreen) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .background(.black.opacity(0.58), in: Circle())
                 }
                 .accessibilityLabel(L10n.string("ytvideo_player.exit_fullscreen", fallback: "Exit Full Screen"))
@@ -909,6 +876,7 @@ private struct YTIFrameAppControlOverlay: View {
                 Button(action: onEnterFullscreen) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .background(.black.opacity(0.58), in: Circle())
                 }
                 .accessibilityLabel(L10n.string("ytvideo_player.enter_fullscreen", fallback: "Enter Full Screen"))
@@ -1028,6 +996,7 @@ private struct YTVideoControlOverlay: View {
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .background(.black.opacity(0.45), in: Circle())
                 }
                 .accessibilityLabel(L10n.string("ytvideo_player.settings", fallback: "Settings"))
@@ -1036,6 +1005,7 @@ private struct YTVideoControlOverlay: View {
                 Button(action: onExitFullscreen) {
                     Image(systemName: "arrow.down.right.and.arrow.up.left")
                         .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .background(.black.opacity(0.45), in: Circle())
                 }
                 .accessibilityLabel(L10n.string("ytvideo_player.exit_fullscreen", fallback: "Exit Full Screen"))
@@ -1114,6 +1084,7 @@ private struct YTVideoControlOverlay: View {
                     Button(action: onEnterFullscreen) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel(L10n.string("ytvideo_player.enter_fullscreen", fallback: "Enter Full Screen"))
                     .accessibilityIdentifier("player.fullscreen.enter")
@@ -1135,6 +1106,7 @@ private struct YTVideoControlOverlay: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .disabled(disabled)
         .accessibilityLabel(label)

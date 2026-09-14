@@ -195,17 +195,11 @@ struct PodcastEpisodeMetadataHeader: View {
                                         ? L10n.string("podcast.show_less", fallback: "Show less")
                                         : L10n.string("podcast.show_more", fallback: "Show more")
                                 )
-                                Spacer()
                                 Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
                             }
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
-                            .padding(.horizontal, 12)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .background(
-                                Color.accentColor.opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
+                            .frame(minHeight: 44, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -224,7 +218,12 @@ struct PodcastEpisodeMetadataHeader: View {
                         systemImage: "safari"
                     )
                 }
+                #if os(tvOS)
+                .buttonStyle(.borderedProminent)
+                .tint(.gray)
+                #else
                 .buttonStyle(.bordered)
+                #endif
                 .accessibilityIdentifier("podcast.episode-website-link")
             }
         }
@@ -247,35 +246,42 @@ struct PodcastEpisodeFacts: View {
     let episode: EpisodeRecord
 
     var body: some View {
-        HStack(spacing: 10) {
-            if let publishedAt = episode.publishedAt {
-                Text(publishedAt, style: .date)
-            }
-            if let duration = episode.mediaDurationSeconds {
-                Label(podcastDurationText(duration), systemImage: "clock")
-            }
-            if let season = episode.seasonNumber,
-               let number = episode.episodeNumber {
-                Text(
-                    L10n.format(
-                        "podcast.season_episode",
-                        fallback: "S%@ E%@",
-                        String(season),
-                        String(number)
-                    )
-                )
-            } else if let number = episode.episodeNumber {
-                Text(
-                    L10n.format(
-                        "podcast.episode_number",
-                        fallback: "Episode %@",
-                        String(number)
-                    )
-                )
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { facts }
+                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 4) { facts }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var facts: some View {
+        if let publishedAt = episode.publishedAt {
+            Text(publishedAt, style: .date)
+        }
+        if let duration = episode.mediaDurationSeconds {
+            Label(podcastDurationText(duration), systemImage: "clock")
+        }
+        if let season = episode.seasonNumber,
+           let number = episode.episodeNumber {
+            Text(
+                L10n.format(
+                    "podcast.season_episode",
+                    fallback: "S%@ E%@",
+                    String(season),
+                    String(number)
+                )
+            )
+        } else if let number = episode.episodeNumber {
+            Text(
+                L10n.format(
+                    "podcast.episode_number",
+                    fallback: "Episode %@",
+                    String(number)
+                )
+            )
+        }
     }
 }
 

@@ -1,0 +1,52 @@
+{
+  "results": [
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD1",
+      "platform": "apple_podcasts",
+      "sourceType": "podcast_show",
+      "sourceId": "1234567890",
+      "canonicalURL": "https://podcasts.apple.com/us/podcast/id1234567890",
+      "feedURL": "https://feeds.example.com/accounting.xml",
+      "title": "Accounting After Hours",
+      "publisher": "Example Media",
+      "publishedAt": null,
+      "durationSeconds": null,
+      "description": "Weekly conversations about accounting practice.",
+      "thumbnailURL": "https://is1-ssl.mzstatic.com/image/thumb/example.jpg",
+      "availability": "public",
+      "provider": "apple_search",
+      "fallback": false,
+      "provenance": {
+        "title": "apple_search",
+        "feedURL": "apple_search"
+      },
+      "deepResearchAvailability": "unavailable",
+      "warnings": ["show_only_select_an_episode"]
+    },
+    {
+      "searchResultId": "sr_01ARZ3NDEKTSV4RRFFQ69G5FD2",
+      "platform": "apple_podcasts",
+      "sourceType": "podcast_episode",
+      "sourceId": "ep-ai-ledger-2026",
+      "canonicalURL": "https://podcasts.apple.com/us/podcast/id1234567890?i=1000123456789",
+      "feedURL": "https://feeds.example.com/accounting.xml",
+      "title": "AI and the ledger",
+      "publisher": "Example Media",
+      "publishedAt": "2026-06-15T08:00:00Z",
+      "durationSeconds": 2460,
+      "description": "How firms are using models for audit sampling.",
+      "thumbnailURL": "https://is1-ssl.mzstatic.com/image/thumb/example.jpg",
+      "availability": "public",
+      "provider": "rss",
+      "fallback": false,
+      "provenance": {
+        "title": "rss",
+        "sourceId": "rss"
+      },
+      "deepResearchAvailability": "available",
+      "warnings": [],
+      "enclosureUrl": "https://cdn.example.com/ai-ledger.mp3",
+      "enclosureType": "audio/mpeg"
+    }
+  ]
+}

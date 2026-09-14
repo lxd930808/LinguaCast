@@ -10,6 +10,7 @@ struct PodcastEnglishStudioApp: App {
     @State private var runner = PipelineRunner()
     @State private var cloudSync = CloudSyncCoordinator.shared
     @State private var catalogRecovery: PlaybackCatalogRecoveryCoordinator
+    @State private var settingsNavigation = SettingsNavigation()
     private let modelContainer: ModelContainer
 
     init() {
@@ -46,7 +47,11 @@ struct PodcastEnglishStudioApp: App {
             SegmentRecord.self,
             TranslationVariantRecord.self,
             YTChannelRecord.self,
-            YTVideoRecord.self
+            YTVideoRecord.self,
+            // V10/WP14: registering the remote job record activates WP13's
+            // in-context persistence (YTRemoteContentJobStore detects it here)
+            // and lets detail views read audioReady/retryable snapshots.
+            RemoteContentJobRecord.self
         ])
         let configuration = ModelConfiguration(
             schema: schema,
@@ -73,6 +78,12 @@ struct PodcastEnglishStudioApp: App {
                 .environment(runner)
                 .environment(cloudSync)
                 .environment(catalogRecovery)
+                .environment(settingsNavigation)
+                .onOpenURL { url in
+                    #if os(iOS)
+                    _ = PlaybackDeepLinkCoordinator.shared.handle(url)
+                    #endif
+                }
         }
         .modelContainer(modelContainer)
     }

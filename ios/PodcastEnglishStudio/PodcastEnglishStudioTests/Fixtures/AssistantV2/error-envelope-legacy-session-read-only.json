@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "LEGACY_SESSION_READ_ONLY",
+    "message": "V1 session mutations are disabled",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {}
+  }
+}

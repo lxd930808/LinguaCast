@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import PodcastEnglishStudioCore
 import DomainModels
 import CloudSyncKit
@@ -33,17 +34,26 @@ extension EpisodeDetailView {
         .linguaPage()
         // Phase 0 attachment: keep the screen awake during playback. The modifier is a stub
         // until WT5 implements it (isIdleTimerDisabled) in KeepScreenAwakeModifier.swift.
-        .keepScreenAwake(while: player.isPlaying)
+        .keepScreenAwake(while: player.isPlaying || chinesePlayer.isPlaying || chinesePlayer.isPreparing || chinesePlayer.isBuffering)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if episode.status == "completed" {
-                PlayerBar(
-                    player: player,
-                    showsLocateButton: !isFollowingPlayback,
-                    onLocate: locateCurrentPlayback,
-                    onPlaybackTimeChanged: { persistPlaybackProgress($0) },
-                    onDurationChanged: persistPlaybackDurationIfNeeded,
-                    onPlaybackStarted: handlePlaybackStarted
-                )
+                VStack(spacing: 0) {
+                    chineseModeControl
+                    if chinesePlayer.isSelected {
+                        ChinesePlayerBar(player: chinesePlayer, onLocate: locateCurrentPlayback)
+                    } else {
+                        PlayerBar(
+                            player: player,
+                            showsLocateButton: !isFollowingPlayback,
+                            onLocate: locateCurrentPlayback,
+                            onPlaybackTimeChanged: { persistPlaybackProgress($0) },
+                            onDurationChanged: persistPlaybackDurationIfNeeded,
+                            onPlaybackStarted: handlePlaybackStarted
+                        )
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("media.playback-controls")
             }
         }
         .navigationTitle(episode.episodeTitle)
@@ -58,48 +68,149 @@ extension EpisodeDetailView {
             ToolbarItem(placement: .principal) {
                 Text(episode.episodeTitle)
                     .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
+                    .lineLimit(2)
             }
             #endif
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showChinese.toggle()
-                } label: {
-                    Text(
-                        showChinese
-                            ? L10n.string("subtitles.bilingual", fallback: "Bilingual")
-                            : L10n.string("subtitles.english_only", fallback: "English Only")
-                    )
-                    .font(.subheadline.weight(.semibold))
-                }
-                .accessibilityLabel(
-                    showChinese
-                        ? L10n.string("subtitles.hide_translation", fallback: "Hide Translation")
-                        : L10n.string("subtitles.show_translation", fallback: "Show Translation")
-                )
-                .accessibilityIdentifier("transcript.translation-toggle")
-            }
-            if PodcastClearAndRegeneratePolicy.isAvailable(status: episode.status) {
-                ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 8) {
                     Button {
-                        clearAndRegenerateProcessing()
+                        showChinese.toggle()
                     } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text(
+                            showChinese
+                                ? L10n.string("subtitles.bilingual", fallback: "Bilingual")
+                                : L10n.string("subtitles.english_only", fallback: "English Only")
+                        )
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .accessibilityLabel(
-                        L10n.string("episodes.clear_and_regenerate", fallback: "Clear and regenerate")
+                        showChinese
+                            ? L10n.string("subtitles.hide_translation", fallback: "Hide Translation")
+                            : L10n.string("subtitles.show_translation", fallback: "Show Translation")
                     )
-                    .accessibilityIdentifier("podcast.clear-and-regenerate")
+                    .accessibilityIdentifier("transcript.translation-toggle")
+                    Button { showingPlaybackSettings = true } label: {
+                        Image(systemName: "gearshape")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(L10n.string("playback.settings.title", fallback: "Playback Settings"))
+                    .accessibilityIdentifier("player.settings.podcast")
                 }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
+        .sheet(isPresented: $showingPlaybackSettings) {
+            PodcastPlaybackSettingsPanel(
+                episode: episode, showChinese: $showChinese,
+                playbackRate: Binding(get: {
+                    chinesePlayer.isSelected ? chinesePlayer.playbackRate : player.playbackRate
+                }, set: { rate in
+                    if chinesePlayer.isSelected { chinesePlayer.playbackRate = rate }
+                    else { player.playbackRate = rate }
+                }),
+                chinesePlayer: chinesePlayer, canSelectChinese: !segments.isEmpty,
+                onSelectRhythm: selectChineseRhythm,
+                onRegenerate: clearAndRegenerateProcessing
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
+            if let kind = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+               kind == AVAudioSession.InterruptionType.began.rawValue { chinesePlayer.pause() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
+            guard let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt else { return }
+            if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { chinesePlayer.pause() }
+            // A new route moves the clock the next sentence was scheduled against.
+            else { chinesePlayer.handleRouteChange() }
+        }
+        .onChange(of: chinesePlayer.originalTime) { _, time in
+            if chinesePlayer.isSelected { persistPlaybackProgress(time, allowCompletion: false) }
+        }
+        .onChange(of: chinesePlayer.didFinishEpisode) { _, finished in
+            if finished { persistPlaybackProgress(chinesePlayer.duration, force: true) }
+        }
+        .onChange(of: segments) { _, _ in
+            chinesePlayer.invalidateIfChanged(episodeID: episode.id, language: settings.configuration.translationTargetLanguage, rows: segments)
+        }
+        .onChange(of: settings.configuration.translationTargetLanguage) { _, _ in chinesePlayer.stop() }
         .onChange(of: scenePhase) { _, phase in
-            handleScenePhaseChange(phase)
+            chinesePlayer.setForeground(phase == .active)
+            if chinesePlayer.isSelected {
+                if phase != .active { persistPlaybackProgress(chinesePlayer.originalTime, force: true, allowCompletion: false) }
+            } else { handleScenePhaseChange(phase) }
         }
     }
 
+    var displayedActiveSequence: Int? {
+        chinesePlayer.isSelected ? chinesePlayer.activeSequence : player.activeSequence
+    }
+
+    var chineseModeControl: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            PlaybackSegmentedControl(
+                selection: chinesePlayer.isSelected,
+                firstTitle: L10n.string("tts.original", fallback: "Original"),
+                secondTitle: L10n.string("tts.chinese", fallback: "Chinese"),
+                firstIdentifier: "player.mode-original", secondIdentifier: "player.mode-chinese",
+                onSelect: selectPlaybackSource
+            )
+            .disabled(segments.isEmpty)
+            if !chinesePlayer.isSelected, let error = chinesePlayer.errorMessage {
+                Text(error).font(.caption).foregroundStyle(LinguaTheme.danger)
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 4)
+        .background(.ultraThinMaterial)
+    }
+
+    private func selectPlaybackSource(_ chinese: Bool) {
+        guard chinese != chinesePlayer.isSelected else { return }
+        if chinese {
+            persistPlaybackProgress(player.currentTime, force: true)
+            chinesePlayer.select(episodeID: episode.id, language: settings.configuration.translationTargetLanguage,
+                rows: segments, original: AudioPlaybackControllerBridge(title: episode.episodeTitle, time: player.currentTime,
+                    duration: player.duration, rate: player.playbackRate, isPlaying: player.isPlaying,
+                    pause: { player.pausePlayback() }))
+        } else {
+            let resume = chinesePlayer.shouldResumeOriginal
+            let time = chinesePlayer.originalSentenceStart
+            chinesePlayer.stop()
+            chinesePlayer.forgetSelectedMode()
+            player.playbackRate = chinesePlayer.playbackRate
+            player.prepareResume(at: time)
+            if resume && !player.isPlaying { player.playPause() }
+        }
+    }
+
+    private func selectChineseRhythm(natural: Bool) {
+        chinesePlayer.selectRhythm(natural ? .natural : .current)
+        guard !chinesePlayer.isSelected else { return }
+        persistPlaybackProgress(player.currentTime, force: true)
+        chinesePlayer.select(episodeID: episode.id, language: settings.configuration.translationTargetLanguage,
+            rows: segments, original: AudioPlaybackControllerBridge(title: episode.episodeTitle, time: player.currentTime,
+                duration: player.duration, rate: player.playbackRate, isPlaying: player.isPlaying,
+                pause: { player.pausePlayback() }))
+    }
+
     var readingView: some View {
+        // Playback time changes every 200 ms. Keep those updates out of the lazy
+        // scroll hierarchy: reapplying its layout can repeatedly adjust the inset
+        // and move the retained viewport even without a new scroll request.
+        StableTranscriptContent(
+            state: TranscriptRenderState(episodeID: episode.id, segments: segments,
+                activeSequence: displayedActiveSequence, followsPlayback: isFollowingPlayback,
+                locateRequest: locatePlaybackRequest, showChinese: showChinese,
+                presentation: settings.committedSubtitlePresentation),
+            content: { transcriptScrollView }
+        ).equatable()
+    }
+
+    private var transcriptScrollView: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
@@ -111,15 +222,18 @@ extension EpisodeDetailView {
                     .padding(.horizontal)
                     .padding(.bottom, 12)
 
-                    ForEach(segments.indices, id: \.self) { index in
-                        let segment = segments[index]
+                    // Use the same stable identity for rows and scroll targets.
+                    ForEach(Array(segments.enumerated()), id: \.element.sequence) { index, segment in
                         ReadingSegmentRow(
                             segment: segment,
-                            isActive: player.activeSequence == segment.sequence,
+                            isActive: displayedActiveSequence == segment.sequence,
                             showChinese: showChinese,
                             showsSpeaker: shouldShowSpeaker(at: index),
                             subtitlePresentation: settings.committedSubtitlePresentation,
-                            onPlay: { player.play(segment: segment) }
+                            onPlay: {
+                                if chinesePlayer.isSelected { chinesePlayer.play(sequence: segment.sequence) }
+                                else { player.play(segment: segment) }
+                            }
                         )
                         .id(segment.sequence)
                     }
@@ -131,24 +245,33 @@ extension EpisodeDetailView {
                 DragGesture(minimumDistance: 8)
                     .onChanged { _ in
                         guard hasInitializedScroll else { return }
+                        transcriptScrollTask?.cancel()
                         updateTranscriptFollowing(after: .userDragBegan)
                     }
             )
             .onAppear {
-                scrollToSequence(player.activeSequence, using: proxy)
+                scrollToSequence(displayedActiveSequence, using: proxy)
                 hasInitializedScroll = true
             }
-            .onChange(of: player.activeSequence) { _, sequence in
+            .onDisappear {
+                transcriptScrollTask?.cancel()
+                transcriptScrollTask = nil
+            }
+            .onChange(of: displayedActiveSequence) { _, sequence in
                 guard isFollowingPlayback else { return }
                 scrollToSequence(sequence, using: proxy)
             }
             .onChange(of: locatePlaybackRequest) { _, _ in
-                scrollToSequence(player.activeSequence, using: proxy)
+                scrollToSequence(displayedActiveSequence, using: proxy)
+            }
+            .onChange(of: showChinese) { _, _ in
+                guard isFollowingPlayback else { return }
+                scrollToSequence(displayedActiveSequence, using: proxy)
             }
             .onChange(of: settings.committedSubtitlePresentation) { _, _ in
                 // Presentation size/order can change row height; re-anchor only while follow is on.
                 guard isFollowingPlayback else { return }
-                scrollToSequence(player.activeSequence, using: proxy)
+                scrollToSequence(displayedActiveSequence, using: proxy)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("subtitle.ready-state")
@@ -156,14 +279,86 @@ extension EpisodeDetailView {
     }
 
     func scrollToSequence(_ sequence: Int?, using proxy: ScrollViewProxy) {
+        transcriptScrollTask?.cancel()
         guard let sequence else { return }
         // LazyVStack may not have materialized the destination row yet — especially right
         // after scene reactivation. Yield so the next layout pass can build the cue before
         // scrollTo runs (otherwise the first post-unlock scroll is dropped).
-        Task { @MainActor in
+        transcriptScrollTask = Task { @MainActor in
             await Task.yield()
+            guard !Task.isCancelled, isFollowingPlayback,
+                  sequence == displayedActiveSequence else { return }
             proxy.scrollTo(sequence, anchor: activeTranscriptScrollAnchor)
         }
+    }
+}
+
+private struct ChinesePlayerBar: View {
+    @Bindable var player: EpisodeChinesePlayback
+    let onLocate: () -> Void
+    @State private var scrub: Double?
+    var body: some View {
+        VStack(spacing: 8) {
+            // Keep the safe-area inset stable when synthesis/buffering changes.
+            // Otherwise every buffer transition resizes the transcript during a scroll.
+            HStack {
+                ProgressView()
+                ZStack {
+                    Text(L10n.string("tts.buffering", fallback: "Buffering Chinese audio…"))
+                        .opacity(player.isBuffering && !player.isPreparing ? 1 : 0)
+                        .accessibilityHidden(!player.isBuffering || player.isPreparing)
+                    Text(L10n.string("tts.preparing", fallback: "Preparing Chinese audio…"))
+                        .opacity(player.isPreparing ? 1 : 0)
+                        .accessibilityHidden(!player.isPreparing)
+                }
+            }
+            .font(.caption)
+            .opacity(player.isPreparing || player.isBuffering ? 1 : 0)
+            .accessibilityHidden(!player.isPreparing && !player.isBuffering)
+            if let error = player.errorMessage { Text(error).font(.caption).foregroundStyle(LinguaTheme.danger) }
+            if player.stoppedSegmentID != nil {
+                HStack(spacing: 16) {
+                    if player.canRetryStoppedSegment {
+                        Button(L10n.string("tts.retry", fallback: "Retry")) { player.retryStoppedSegment() }
+                            .accessibilityIdentifier("player.chinese-retry")
+                    }
+                    Button(L10n.string("tts.skip_segment", fallback: "Skip this sentence")) { player.skipStoppedSegment() }
+                        .accessibilityIdentifier("player.chinese-skip")
+                    Spacer()
+                }.font(.caption)
+            }
+            HStack {
+                Text(L10n.string("tts.original_position", fallback: "Original timeline"))
+                Spacer()
+                Text(formatTime(scrub ?? player.originalTime) + " / " + formatTime(player.duration))
+            }.font(.caption.monospacedDigit())
+            Slider(value: Binding(get: { scrub ?? player.originalTime }, set: { scrub = $0 }),
+                   in: 0...max(player.duration, 1), onEditingChanged: { editing in
+                if !editing, let value = scrub { player.seek(to: value); scrub = nil }
+            })
+            .accessibilityIdentifier("player.chinese-progress")
+            HStack(spacing: 12) {
+                Button { player.seek(to: player.originalTime - 15) } label: { Image(systemName: "gobackward.15").frame(width: 44, height: 44)
+                            .contentShape(Rectangle()) }
+                Button { player.playPause() } label: {
+                    Image(systemName: player.shouldResumeOriginal ? "pause.fill" : "play.fill")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.borderedProminent).accessibilityIdentifier("player.chinese-play-pause")
+                .accessibilityLabel(player.shouldResumeOriginal ? L10n.string("episode_detail.pause", fallback: "Pause") : L10n.string("episode_detail.play", fallback: "Play"))
+                .accessibilityValue(player.isPreparing ? "preparing" : (player.isPlaying ? "playing" : "paused"))
+                Button { player.seek(to: player.originalTime + 15) } label: { Image(systemName: "goforward.15").frame(width: 44, height: 44)
+                            .contentShape(Rectangle()) }
+                Button(action: onLocate) { Image(systemName: "scope").frame(width: 44, height: 44)
+                            .contentShape(Rectangle()) }
+                Spacer()
+                Picker(L10n.string("episode_detail.speed", fallback: "speed"), selection: $player.playbackRate) {
+                    Text(verbatim: "0.75x").tag(Float(0.75))
+                    Text(verbatim: "1x").tag(Float(1))
+                    Text(verbatim: "1.25x").tag(Float(1.25))
+                }.pickerStyle(.menu)
+            }
+        }.padding(.horizontal, 16).padding(.bottom, 8).background(.ultraThinMaterial)
     }
 }
 
@@ -231,7 +426,7 @@ private struct ReadingSegmentRow: View {
         }
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(isActive ? Color.accentColor : Color.clear)
+                .fill(isActive ? LinguaTheme.accent : Color.clear)
                 .frame(width: 3)
                 .padding(.vertical, 10)
         }
@@ -245,6 +440,7 @@ private struct ReadingSegmentRow: View {
         .accessibilityHint(formatTime(segment.startMS))
         .accessibilityValue(Text(verbatim: isActive ? "active" : "inactive"))
         .accessibilityIdentifier("transcript.segment.\(segment.sequence)")
+
     }
 
     /// English stays primary; target secondary. Order follows committed prefs; VO matches visual order.
@@ -266,7 +462,9 @@ private struct ReadingSegmentRow: View {
 
     private var englishLine: some View {
         Text(segment.learningText)
-            .font(.system(size: englishFontSize, weight: isActive ? .medium : .regular))
+            // Highlight with the existing background, border and speaker marker.
+            // Changing font weight can rewrap a row and move the lazy stack while scrolling.
+            .font(.system(size: englishFontSize, weight: .regular))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -321,8 +519,9 @@ private struct PlayerBar: View {
                     HStack(spacing: 14) {
                         if showsLocateButton {
                             Button(action: onLocate) {
-                                Image(systemName: "location.fill")
-                                    .frame(width: 30, height: 30)
+                                Image(systemName: "scope")
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.circle)
@@ -362,7 +561,8 @@ private struct PlayerBar: View {
                         player.skip(by: -15)
                     } label: {
                         Image(systemName: "gobackward.15")
-                            .frame(width: 30, height: 30)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.string("player.back_15_seconds", fallback: "Back 15 Seconds"))
@@ -384,7 +584,8 @@ private struct PlayerBar: View {
                         player.skip(by: 15)
                     } label: {
                         Image(systemName: "goforward.15")
-                            .frame(width: 30, height: 30)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.string("player.forward_15_seconds", fallback: "Forward 15 Seconds"))
@@ -400,11 +601,11 @@ private struct PlayerBar: View {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(width: 36, height: transportRowHeight)
+                .frame(width: 44, height: transportRowHeight)
                 .accessibilityLabel(
                     isExpanded
                         ? L10n.string("player.collapse_controls", fallback: "Collapse Playback Controls")
@@ -425,11 +626,6 @@ private struct PlayerBar: View {
         .background(LinguaTheme.backgroundRaised.opacity(0.94))
         .overlay(alignment: .top) {
             Divider()
-        }
-        .background {
-            Color.clear
-                .accessibilityElement()
-                .accessibilityIdentifier("media.playback-controls")
         }
         .onChange(of: player.currentTime) { _, currentTime in
             onPlaybackTimeChanged(currentTime)
@@ -468,3 +664,22 @@ private struct PlayerBar: View {
     }
 }
 #endif
+
+private struct TranscriptRenderState: Equatable {
+    let episodeID: String
+    let segments: [LearningSegment]
+    let activeSequence: Int?
+    let followsPlayback: Bool
+    let locateRequest: Int
+    let showChinese: Bool
+    let presentation: SubtitlePresentationPreferences
+}
+
+private struct StableTranscriptContent<Content: View>: View, Equatable {
+    let state: TranscriptRenderState
+    let content: () -> Content
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.state == rhs.state }
+
+    var body: some View { content() }
+}

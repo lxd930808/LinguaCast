@@ -18,6 +18,13 @@ enum UITestScenario: String {
     case podcastFailed = "podcast-failed"
     case podcastCloudCheckRequired = "podcast-cloud-check-required"
     case podcastLargeList = "podcast-large-list"
+    // V10/WP14 fake cloud states: fully offline, driven by fixture records.
+    case podcastCloudQueued = "podcast-cloud-queued"
+    case podcastCloudRunning = "podcast-cloud-running"
+    case podcastCloudFailed = "podcast-cloud-failed"
+    case podcastCloudFailedFinal = "podcast-cloud-failed-final"
+    case youtubeCloudGenerating = "youtube-cloud-generating"
+    case youtubeCloudFailed = "youtube-cloud-failed"
     case youtubePartial = "youtube-partial"
     case youtubeFailed = "youtube-failed"
     case youtubeReady = "youtube-ready"
@@ -27,8 +34,20 @@ enum UITestScenario: String {
     var usesDirectScene: Bool {
         switch self {
         case .podcastQueued, .podcastQueuedMissingConfiguration, .podcastRunning, .podcastCompletionTransition, .podcastReady, .podcastFollow, .podcastLockResume, .podcastFailed, .podcastCloudCheckRequired, .podcastLargeList,
+             .podcastCloudQueued, .podcastCloudRunning, .podcastCloudFailed, .podcastCloudFailedFinal,
+             .youtubeCloudGenerating, .youtubeCloudFailed,
              .youtubePartial, .youtubeFailed, .youtubeReady, .youtubeChannel, .mobileSetup: true
         case .tabs, .firstLaunch: false
+        }
+    }
+
+    /// WP14 task 10: scenarios that pin a fake cloud generation state. The
+    /// app must not schedule real pipelines or hit the network for these.
+    var usesFakeCloudState: Bool {
+        switch self {
+        case .podcastCloudQueued, .podcastCloudRunning, .podcastCloudFailed, .podcastCloudFailedFinal,
+             .youtubeCloudGenerating, .youtubeCloudFailed: true
+        default: false
         }
     }
 }
@@ -80,11 +99,31 @@ enum UITestSupport {
     static var fixtureConfiguration: AppConfiguration {
         var value = AppConfiguration()
         guard scenario != .firstLaunch, scenario != .podcastQueuedMissingConfiguration else { return value }
+        if scenario.usesFakeCloudState {
+            // Fake cloud state (WP14 task 10): the cloud backend is selected
+            // and configured; no DashScope/translation keys exist, proving the
+            // cloud path needs no on-device generation keys. The token value
+            // must never appear in screenshots (settings shows it masked).
+            value.youtubeAPIKey = "fixture-youtube"
+            value.translationTarget = .simplifiedChinese
+            value.contentServiceEnabled = true
+            value.contentServiceToken = "fixture-cloud-token"
+            value.generationBackend = GenerationBackend.cloud.rawValue
+            applySubtitlePresentationFixtureOverrides(to: &value)
+            return value
+        }
         value.youtubeAPIKey = "fixture-youtube"
         value.dashscopeAPIKey = "fixture-dashscope"
         value.translationAPIKey = "fixture-translation"
         value.translationTarget = .simplifiedChinese
         applySubtitlePresentationFixtureOverrides(to: &value)
+        // LINGUACAST_UI_CLOUD_FIXTURE=1 layers a configured cloud service onto
+        // any scenario (used by the settings screenshot/token-masking tests).
+        if ProcessInfo.processInfo.environment["LINGUACAST_UI_CLOUD_FIXTURE"] == "1" {
+            value.contentServiceEnabled = true
+            value.contentServiceToken = "fixture-cloud-token"
+            value.generationBackend = GenerationBackend.cloud.rawValue
+        }
         return value
     }
 
@@ -185,6 +224,9 @@ enum UITestSupport {
         switch value {
         case "programs": return .programs
         case "subscriptions": return .subscriptions
+        #if os(iOS)
+        case "assistant": return .assistant
+        #endif
         case "settings": return .settings
         default: return .home
         }
@@ -192,6 +234,7 @@ enum UITestSupport {
 
     @MainActor
     static func installFixtures(in context: ModelContext) {
+        guard scenario != .firstLaunch else { return }
         let existing = (try? context.fetch(FetchDescriptor<PodcastSubscription>())) ?? []
         guard existing.isEmpty else { return }
 
@@ -209,7 +252,7 @@ enum UITestSupport {
             hasMoreEpisodes: true
         )
         let episode = EpisodeRecord(
-            id: "ui-episode-\(scenario.rawValue)",
+            id: "ui-episode-\(scenario.rawValue)" + (ProcessInfo.processInfo.environment["LINGUACAST_UI_VARIABLE_TRANSCRIPT"] == "1" ? "-variable-1603" : ""),
             subscriptionID: podcast.id,
             showTitle: podcast.displayName,
             showArtist: "LinguaCast Fixtures",
@@ -262,6 +305,27 @@ enum UITestSupport {
                 "cloud.detail.starting",
                 fallback: "Checking the account and cloud changes."
             )
+        } else if scenario == .podcastCloudQueued {
+            // Submitted cloud job still waiting on the server queue.
+            episode.status = "queued"
+            episode.pipelineStep = "queued"
+        } else if scenario == .podcastCloudRunning {
+            // Cloud job in flight; the remote record marks audio ready first.
+            episode.status = "running"
+            episode.pipelineStep = "transcribe"
+            episode.pipelineProgress = 0.48
+            episode.pipelineMessage = "transcribe"
+            episode.activeTranslationTargetLanguage = TranslationTarget.simplifiedChinese.rawValue
+        } else if scenario == .podcastCloudFailed {
+            // Retryable cloud failure (transient ASR error).
+            episode.status = "failed"
+            episode.pipelineStep = "transcribe"
+            episode.errorMessage = "INTERNAL_ERROR: ASR provider failed"
+        } else if scenario == .podcastCloudFailedFinal {
+            // Non-retryable cloud failure (source media rejected).
+            episode.status = "failed"
+            episode.pipelineStep = "cloud_validate"
+            episode.errorMessage = "MEDIA_TOO_LONG: source exceeds the supported duration"
         }
 
         let channel = YTChannelRecord(
@@ -290,6 +354,17 @@ enum UITestSupport {
             video.subtitleTranslatedCount = 0
             video.subtitleTotalCount = 10
             video.lastError = L10n.string("subtitles.unavailable", fallback: "Subtitles Unavailable")
+        case .youtubeCloudGenerating:
+            // WP13 cloud pipeline mid-flight: server is translating.
+            video.subtitleStatus = "generating"
+            video.sourceGenerationStep = "translating"
+            video.sourceGenerationProgress = 0.4
+        case .youtubeCloudFailed:
+            // Non-retryable cloud failure with the stable [CODE] suffix.
+            video.subtitleStatus = "failed"
+            video.subtitleTranslatedCount = 0
+            video.subtitleTotalCount = 10
+            video.lastError = "The source platform restricts this video (region, age, or login). [SOURCE_RESTRICTED]"
         default:
             video.subtitleStatus = "partial"
             video.subtitleTranslatedCount = 7
@@ -303,6 +378,26 @@ enum UITestSupport {
         context.insert(episode)
         context.insert(channel)
         context.insert(video)
+        if scenario == .youtubeChannel,
+           ProcessInfo.processInfo.environment["LINGUACAST_UI_CHANNEL_GRID"] == "1" {
+            for index in 1...10 {
+                let gridVideo = YTVideoRecord(
+                    id: "ui-grid-video-\(index)", channelRecordID: channel.id,
+                    channelID: channel.channelID, title: "V17 Grid Video \(index)" + (index == 5 ? " with a long title that wraps across two readable lines" : ""),
+                    publishedAt: Date(timeIntervalSince1970: 1_700_000_100 - Double(index)),
+                    url: "https://youtube.com/watch?v=fixture-grid-\(index)"
+                )
+                gridVideo.subtitleStatus = "failed"
+                gridVideo.lastError = "Offline grid fixture"
+                if index == 7 {
+                    gridVideo.subtitleStatus = "translating"
+                    gridVideo.subtitleTranslatedCount = 7
+                    gridVideo.subtitleTotalCount = 10
+                }
+                context.insert(gridVideo)
+            }
+        }
+        installFakeCloudJobRecordIfNeeded(for: episode, feedURL: podcast.feedURL, in: context)
         if scenario == .podcastLargeList {
             for index in 1..<1_000 {
                 context.insert(EpisodeRecord(
@@ -335,24 +430,33 @@ enum UITestSupport {
             context.insert(segment)
             installSilentAudio(for: episode)
         } else if scenario == .podcastFollow {
-            episode.playbackPositionSeconds = 0
-            episode.playbackDurationSeconds = 20
-            for sequence in 1...20 {
-                let startMS = (sequence - 1) * 1_000
+            let variableTranscript = ProcessInfo.processInfo.environment["LINGUACAST_UI_VARIABLE_TRANSCRIPT"] == "1"
+            let rowCount = variableTranscript ? 1603 : 20
+            let rowDurationMS = variableTranscript ? 3_100 : 1_000
+            episode.playbackPositionSeconds = variableTranscript ? 2_390.1 : 0
+            episode.playbackDurationSeconds = Double(rowCount * rowDurationMS) / 1_000
+            if variableTranscript {
+                UserDefaults.standard.removeObject(forKey: "chinese-playback." + episode.id)
+            }
+            for sequence in 1...rowCount {
+                let startMS = (sequence - 1) * rowDurationMS
                 context.insert(
                     SegmentRecord(
                         id: "ui-follow-segment-\(sequence)",
                         episodeID: episode.id,
                         sequence: sequence,
                         startMS: startMS,
-                        endMS: startMS + 999,
+                        endMS: startMS + rowDurationMS - 1,
                         text: "Follow segment \(sequence)",
-                        learningText: "Follow segment \(sequence) with enough text for a full subtitle row.",
+                        learningText: (variableTranscript
+                            ? Array(repeating: "Follow segment \(sequence) with enough text for a full subtitle row.",
+                                    count: [1, 2, 1, 3, 1][(sequence - 1) % 5]).joined(separator: " ")
+                            : "Follow segment \(sequence) with enough text for a full subtitle row."),
                         translation: "自动跟随字幕第 \(sequence) 段。"
                     )
                 )
             }
-            installSilentAudio(for: episode, duration: 20)
+            installSilentAudio(for: episode, duration: UInt32(rowCount * rowDurationMS / 1_000))
         } else if scenario == .podcastLockResume {
             // Mid-episode resume fixture for lock → unlock → play acceptance.
             episode.playbackPositionSeconds = 8
@@ -375,6 +479,58 @@ enum UITestSupport {
             installSilentAudio(for: episode, duration: 20)
         }
         try? context.save()
+    }
+
+    /// WP14 task 10: fake remote-job records for the podcast cloud scenarios,
+    /// written into the main (in-memory) context so the detail view's snapshot
+    /// lookup works with zero network or DMIT dependency.
+    private static func installFakeCloudJobRecordIfNeeded(
+        for episode: EpisodeRecord,
+        feedURL: String?,
+        in context: ModelContext
+    ) {
+        let statusRaw: String
+        let stageRaw: String?
+        let progress: Double
+        let audioReady: Bool
+        let errorCode: String?
+        let errorRetryable: Bool
+        switch scenario {
+        case .podcastCloudQueued:
+            statusRaw = "queued"; stageRaw = nil; progress = 0
+            audioReady = false; errorCode = nil; errorRetryable = false
+        case .podcastCloudRunning:
+            statusRaw = "running"; stageRaw = "transcribing"; progress = 0.48
+            audioReady = true; errorCode = nil; errorRetryable = false
+        case .podcastCloudFailed:
+            statusRaw = "failed"; stageRaw = "transcribing"; progress = 0.48
+            audioReady = true; errorCode = "INTERNAL_ERROR"; errorRetryable = true
+        case .podcastCloudFailedFinal:
+            statusRaw = "failed"; stageRaw = "validating_source"; progress = 0.05
+            audioReady = false; errorCode = "MEDIA_TOO_LONG"; errorRetryable = false
+        default:
+            return
+        }
+        let contentKey = CloudContentKeyPolicy.podcastContentKey(
+            feedURL: feedURL ?? "https://example.com/feed.xml",
+            episodeGUID: episode.episodeGUID
+        )
+        context.insert(RemoteContentJobRecord(
+            stableKey: "podcast_episode|\(contentKey)|zh-Hans|quality|v1",
+            contentKind: CloudContentType.podcastEpisode.rawValue,
+            contentKey: contentKey,
+            jobID: "ui-cloud-job-\(scenario.rawValue)",
+            statusRaw: statusRaw,
+            stageRaw: stageRaw,
+            progress: progress,
+            audioReady: audioReady,
+            subtitlesReady: false,
+            targetLanguage: TranslationTarget.simplifiedChinese.rawValue,
+            translationQuality: CloudTranslationQuality.quality.rawValue,
+            pipelineVersion: "v1",
+            errorCode: errorCode,
+            errorRetryable: errorRetryable
+        ))
     }
 
     /// Writes a complete, valid translation for the episode's active target to disk,
@@ -488,7 +644,8 @@ struct UITestScenarioView: View {
     var body: some View {
         Group {
             switch scenario {
-            case .podcastQueued, .podcastQueuedMissingConfiguration, .podcastRunning, .podcastCompletionTransition, .podcastReady, .podcastFollow, .podcastLockResume, .podcastFailed, .podcastCloudCheckRequired:
+            case .podcastQueued, .podcastQueuedMissingConfiguration, .podcastRunning, .podcastCompletionTransition, .podcastReady, .podcastFollow, .podcastLockResume, .podcastFailed, .podcastCloudCheckRequired,
+                 .podcastCloudQueued, .podcastCloudRunning, .podcastCloudFailed, .podcastCloudFailedFinal:
                 if let episode = episodes.first {
                     NavigationStack { EpisodeDetailView(episode: episode) }
                 } else {
@@ -502,7 +659,7 @@ struct UITestScenarioView: View {
                 } else {
                     ProgressView().accessibilityIdentifier("fixture.loading")
                 }
-            case .youtubePartial, .youtubeFailed, .youtubeReady:
+            case .youtubePartial, .youtubeFailed, .youtubeReady, .youtubeCloudGenerating, .youtubeCloudFailed:
                 if let video = videos.first {
                     NavigationStack { YTVideoPlayerScreen(video: video) }
                 } else {
@@ -537,6 +694,7 @@ struct UITestScenarioView: View {
                     }
             }
             .environment(settings)
+            .environment(SettingsNavigation())
         }
     }
 

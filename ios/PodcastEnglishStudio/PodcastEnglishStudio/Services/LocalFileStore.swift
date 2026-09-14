@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import PodcastEnglishStudioCore
 import DomainModels
 
@@ -27,6 +28,12 @@ struct EpisodeFiles {
     var asrDownloadedResult: URL {
         directory.appending(path: "asr_result.json")
     }
+
+    /// ETag sidecar for cloud artifact downloads (V10 / WP11); keyed by
+    /// "<targetLanguage>|<fileName>" so variants never share cache entries.
+    var cloudArtifactETags: URL {
+        directory.appending(path: "cloud_artifact_etags.json")
+    }
 }
 
 struct TranslationVariantFiles {
@@ -34,10 +41,32 @@ struct TranslationVariantFiles {
     let segments: URL
     let targetVTT: URL
     let manifest: URL
+    /// Cloud-published source-language VTT (V10 / WP11); written only after
+    /// SHA-256 verification, never read by the legacy local pipeline.
+    var sourceVTT: URL {
+        directory.appending(path: "source.vtt")
+    }
     /// Internal checkpoint for background display refinement; not read by the player or synced.
     var displayRefinementCheckpoint: URL {
         directory.appending(path: "display_refinement_checkpoint.json")
     }
+}
+
+/// Errors raised while installing cloud-published artifacts into the local cache.
+enum CloudArtifactCacheError: Error, Equatable {
+    /// Downloaded bytes did not match the manifest SHA-256; the existing cache
+    /// was left untouched.
+    case checksumMismatch(expected: String, actual: String)
+    /// A required manifest role this client does not know how to install.
+    case unsupportedRequiredRole(String)
+    /// A required artifact was not in `ready` status on the server manifest.
+    case missingRequiredArtifact(String)
+    /// The installed segments payload was empty or only partially translated.
+    case incompleteSegments
+    /// The ready job carried no artifact manifest.
+    case missingManifest
+    /// Artifact bundle schema is newer than this client understands.
+    case incompatibleSchema(Int)
 }
 
 final class LocalFileStore {
@@ -90,7 +119,8 @@ final class LocalFileStore {
             files.learning,
             files.manifest,
             files.asrCheckpoint,
-            files.asrDownloadedResult
+            files.asrDownloadedResult,
+            files.cloudArtifactETags
         ] {
             try? fileManager.removeItem(at: url)
         }
@@ -202,5 +232,52 @@ final class LocalFileStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(T.self, from: data)
+    }
+
+    // MARK: - Cloud artifact cache (V10 / WP11)
+
+    /// Stored ETags for cloud artifact downloads, keyed "<target>|<fileName>".
+    /// Returns an empty table when the sidecar is absent or unreadable.
+    func cloudArtifactETags(episodeID: String) -> [String: String] {
+        guard let files = try? episodeFiles(episodeID: episodeID),
+              let etags = try? readJSON([String: String].self, from: files.cloudArtifactETags)
+        else { return [:] }
+        return etags
+    }
+
+    /// Persists the ETag sidecar. Called only after every artifact in a batch
+    /// installed successfully, so an interrupted download keeps the previous
+    /// table consistent with the previous on-disk cache.
+    func writeCloudArtifactETags(_ etags: [String: String], episodeID: String) throws {
+        let files = try episodeFiles(episodeID: episodeID)
+        try writeJSON(etags, to: files.cloudArtifactETags)
+    }
+
+    /// Verifies `data` against the manifest SHA-256 without writing anything.
+    func verifyArtifact(_ data: Data, sha256: String) throws {
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard digest == sha256.lowercased() else {
+            throw CloudArtifactCacheError.checksumMismatch(expected: sha256, actual: digest)
+        }
+    }
+
+    /// Verifies `data` against the manifest SHA-256, then atomically replaces
+    /// `destination` (temp sibling + rename). A checksum failure or an
+    /// interrupted download (which never reaches this call) leaves the
+    /// existing cache byte-identical.
+    func installVerifiedArtifact(_ data: Data, sha256: String, to destination: URL) throws {
+        try verifyArtifact(data, sha256: sha256)
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let temporary = destination.deletingLastPathComponent()
+            .appending(path: ".\(destination.lastPathComponent).cloud.\(UUID().uuidString).tmp")
+        defer { try? fileManager.removeItem(at: temporary) }
+        try data.write(to: temporary, options: .withoutOverwriting)
+        if fileManager.fileExists(atPath: destination.fileSystemPath) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.moveItem(at: temporary, to: destination)
     }
 }

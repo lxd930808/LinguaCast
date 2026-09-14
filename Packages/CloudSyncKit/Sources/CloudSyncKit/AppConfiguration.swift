@@ -52,8 +52,62 @@ public struct AppConfiguration: Equatable, Sendable {
     /// tvOS ignores it and keeps its existing playback path. Missing/invalid values coerce
     /// to the official iframe.
     public var iosYouTubePlaybackMode: String = IOSYouTubePlaybackMode.default.rawValue
+    /// Master switch for the V10 cloud content generation service.
+    public var contentServiceEnabled: Bool = false
+    /// Base URL of the self-hosted content service (HTTPS; paths under /v1/content-*).
+    public var contentServiceBaseURL: String = Self.defaultContentServiceBaseURL
+    /// Client bearer token for the content service. Stored in Keychain like other secrets;
+    /// never logged and never shown in full in UI.
+    public var contentServiceToken: String = ""
+    /// Master switch for the V13 research assistant service. Independent of V10.
+    public var assistantServiceEnabled: Bool = false
+    /// Base URL of the isolated assistant service (HTTPS; paths under /v1/assistant*).
+    public var assistantServiceBaseURL: String = Self.defaultAssistantServiceBaseURL
+    /// Client bearer token for the assistant service. Stored in Keychain; never iCloud-synced in plaintext.
+    public var assistantServiceToken: String = ""
+    /// Raw value of `GenerationBackend`. local = legacy on-device pipeline (rollback path);
+    /// cloud = server-side generation (V10 default once enabled).
+    public var generationBackend: String = GenerationBackend.default.rawValue
 
     public init() {}
+
+    /// Typed accessor for `generationBackend`; normalizes stored values.
+    public var generationBackendMode: GenerationBackend {
+        get { GenerationBackend.normalized(generationBackend) }
+        set { generationBackend = newValue.rawValue }
+    }
+
+    /// Effective content service base URL (trailing slashes trimmed; empty falls back to default).
+    public var normalizedContentServiceBaseURL: String {
+        let trimmed = contentServiceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return Self.defaultContentServiceBaseURL }
+        var value = trimmed
+        while value.hasSuffix("/") { value.removeLast() }
+        return value
+    }
+
+    /// True when cloud generation can actually be used (enabled + token + URL).
+    public var isCloudGenerationUsable: Bool {
+        contentServiceEnabled
+            && !contentServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && URL(string: normalizedContentServiceBaseURL) != nil
+    }
+
+    /// Effective assistant service base URL (trailing slashes trimmed).
+    public var normalizedAssistantServiceBaseURL: String {
+        let trimmed = assistantServiceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return Self.defaultAssistantServiceBaseURL }
+        var value = trimmed
+        while value.hasSuffix("/") { value.removeLast() }
+        return value
+    }
+
+    /// True when the assistant tab can talk to the isolated service.
+    public var isAssistantServiceUsable: Bool {
+        assistantServiceEnabled
+            && !assistantServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && URL(string: normalizedAssistantServiceBaseURL) != nil
+    }
 
     /// Typed accessor for `iosYouTubePlaybackMode`; normalizes stored values.
     public var youTubePlaybackMode: IOSYouTubePlaybackMode {
@@ -118,6 +172,10 @@ public struct AppConfiguration: Equatable, Sendable {
     public static let videoPlaybackRateOptions: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     public static let defaultSubtitleDisplayMode = "bilingual"
+    /// Default self-hosted content service entry (V10).
+    public static let defaultContentServiceBaseURL = "https://content.example.com"
+    /// Default isolated assistant service entry (V13). Distinct host from V10.
+    public static let defaultAssistantServiceBaseURL = "https://assistant.example.com"
     /// YouTube subtitle visibility modes shared by inline and fullscreen layouts.
     public static let subtitleDisplayModeOptions: [String] = ["bilingual", "englishOnly", "off"]
 
@@ -181,6 +239,13 @@ public struct AppConfiguration: Equatable, Sendable {
             case .captionQualityOutlierTolerancePercent:
                 String(format: "%g", captionQualityOutlierTolerancePercent)
             case .iosYouTubePlaybackMode: iosYouTubePlaybackMode
+            case .contentServiceEnabled: contentServiceEnabled ? "true" : "false"
+            case .contentServiceBaseURL: contentServiceBaseURL
+            case .contentServiceToken: contentServiceToken
+            case .assistantServiceEnabled: assistantServiceEnabled ? "true" : "false"
+            case .assistantServiceBaseURL: assistantServiceBaseURL
+            case .assistantServiceToken: assistantServiceToken
+            case .generationBackend: generationBackend
             }
         }
         set {
@@ -235,6 +300,20 @@ public struct AppConfiguration: Equatable, Sendable {
                     Self.captionQualityOutlierTolerancePercent(from: newValue)
             case .iosYouTubePlaybackMode:
                 iosYouTubePlaybackMode = IOSYouTubePlaybackMode.normalized(newValue).rawValue
+            case .contentServiceEnabled:
+                contentServiceEnabled = Self.bool(from: newValue)
+            case .contentServiceBaseURL:
+                contentServiceBaseURL = newValue
+            case .contentServiceToken:
+                contentServiceToken = newValue
+            case .assistantServiceEnabled:
+                assistantServiceEnabled = Self.bool(from: newValue)
+            case .assistantServiceBaseURL:
+                assistantServiceBaseURL = newValue
+            case .assistantServiceToken:
+                assistantServiceToken = newValue
+            case .generationBackend:
+                generationBackend = GenerationBackend.normalized(newValue).rawValue
             }
         }
     }
@@ -276,6 +355,13 @@ public enum AppConfigurationKey: String, CaseIterable, Sendable {
     case keepScreenAwake
     case captionQualityOutlierTolerancePercent
     case iosYouTubePlaybackMode
+    case contentServiceEnabled
+    case contentServiceBaseURL
+    case contentServiceToken
+    case assistantServiceEnabled
+    case assistantServiceBaseURL
+    case assistantServiceToken
+    case generationBackend
 
     public static let translationGroup: Set<Self> = [
         .translationProvider,
@@ -306,10 +392,24 @@ public enum AppConfigurationKey: String, CaseIterable, Sendable {
     public var isSecret: Bool {
         switch self {
         case .youtubeAPIKey, .dashscopeAPIKey, .translationAPIKey,
-             .ossAccessKeyID, .ossAccessKeySecret, .minimaxAPIKey:
+             .ossAccessKeyID, .ossAccessKeySecret, .minimaxAPIKey,
+             .contentServiceToken, .assistantServiceToken:
             true
         default:
             false
         }
+    }
+}
+
+/// V10 generation backend selection. Missing/invalid stored values coerce to `.local`
+/// (the legacy on-device pipeline) so upgrades never silently switch users to cloud.
+public enum GenerationBackend: String, CaseIterable, Sendable {
+    case local
+    case cloud
+
+    public static let `default`: GenerationBackend = .local
+
+    public static func normalized(_ raw: String) -> GenerationBackend {
+        GenerationBackend(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .local
     }
 }

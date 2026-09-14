@@ -1,0 +1,14 @@
+{
+  "runs": [
+    {
+      "searchRunId": "srun_01ARZ3NDEKTSV4RRFFQ69G5FE0",
+      "sessionId": "as_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "turnId": "at_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      "provider": "aggregate",
+      "query": "Satya Nadella",
+      "status": "success",
+      "createdAt": "2026-08-31T01:09:59Z"
+    }
+  ],
+  "nextCursor": null
+}
