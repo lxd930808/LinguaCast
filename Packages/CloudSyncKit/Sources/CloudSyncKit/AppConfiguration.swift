@@ -168,12 +168,12 @@ public struct AppConfiguration: Equatable, Sendable {
     /// back to a placeholder outside the app bundle (e.g. `swift test`).
     public static let defaultContentServiceBaseURL: String =
         (Bundle.main.object(forInfoDictionaryKey: "LinguaCastContentServiceURL") as? String)
-            ?? "https://example.com"
+            ?? "https://content.example.com"
     /// Default isolated assistant service entry (V13). Distinct host from V10; same
     /// Info.plist / xcconfig mechanism as `defaultContentServiceBaseURL`.
     public static let defaultAssistantServiceBaseURL: String =
         (Bundle.main.object(forInfoDictionaryKey: "LinguaCastAssistantServiceURL") as? String)
-            ?? "https://example.com"
+            ?? "https://assistant.example.com"
     /// YouTube subtitle visibility modes shared by inline and fullscreen layouts.
     public static let subtitleDisplayModeOptions: [String] = ["bilingual", "englishOnly", "off"]
 
