@@ -1,0 +1,1302 @@
+openapi: 3.0.3
+info:
+  title: Linguacast Research Assistant API v2
+  version: 2.0.0
+  description: >-
+    V15 file-workspace research-assistant contract. Clients create a Research,
+    stream durable turn events, read artifacts by ID, confirm transcription
+    and global memory proposals. This document, assistant-v2.wire.schema.json,
+    assistant-v2-error-codes.md, assistant-sse-v2.md and
+    assistant-workspace-manifest-v1.schema.json are the single source of truth.
+    V1 contracts remain frozen and must not be reused by name.
+  contact:
+    name: PodcastEnglishStudio V15
+servers:
+  - url: https://assistant.linguacast.xyz
+    description: Production entry (proxy routes /v2/assistant* to 127.0.0.1:3230)
+tags:
+  - name: researches
+  - name: turns
+  - name: artifacts
+  - name: transcriptions
+  - name: memory
+  - name: health
+security:
+  - bearerAuth: []
+paths:
+  /v2/assistant/researches:
+    post:
+      tags: [researches]
+      summary: Create a Research, workspace, initial manifest, and grants
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResearchCreateRequest'
+      responses:
+        '201':
+          description: Database row, directory, and initial manifest are committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Research'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+    get:
+      tags: [researches]
+      summary: List V2 Research summaries newest first. Never includes V1 sessions.
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page of Research summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v2/assistant/researches/{researchId}:
+    get:
+      tags: [researches]
+      summary: Full Research snapshot for disconnect recovery. No server paths.
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [researches]
+      summary: Idempotent delete of V2 workspace, indexes, and research memory
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '202':
+          description: Delete accepted (first request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Research'
+        '204':
+          description: Already deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v2/assistant/researches/{researchId}/turns:
+    post:
+      tags: [turns]
+      summary: Submit a research or content_qa turn
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnCreateRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v2/assistant/turns/{turnId}/events:
+    get:
+      tags: [turns]
+      summary: SSE event stream for a turn
+      parameters:
+        - $ref: '#/components/parameters/TurnId'
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v2/assistant/turns/{turnId}/cancel:
+    post:
+      tags: [turns]
+      summary: Cancel a queued or running turn without deleting ready artifacts
+      parameters:
+        - $ref: '#/components/parameters/TurnId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Cancelled or already terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v2/assistant/researches/{researchId}/artifacts:
+    get:
+      tags: [artifacts]
+      summary: Page artifact summaries. Query by kind/status only, never by path.
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - name: kind
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Artifact summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v2/assistant/researches/{researchId}/artifacts/{artifactId}:
+    get:
+      tags: [artifacts]
+      summary: Read artifact metadata and bounded UTF-8 body by ID only
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/ArtifactId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Metadata plus truncated-safe text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v2/assistant/researches/{researchId}/sources/{sourceId}/transcription:
+    post:
+      tags: [transcriptions]
+      summary: User-confirmed V10 lookup/create. Pi cannot mint confirmation.
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranscriptionCreateRequest'
+      responses:
+        '202':
+          description: TranscriptJob accepted or reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v2/assistant/researches/{researchId}/transcriptions/{transcriptJobId}:
+    get:
+      tags: [transcriptions]
+      summary: Transcript job and source-only install status
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/TranscriptJobId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Job snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscriptJob'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v2/assistant/researches/{researchId}/memory:
+    get:
+      tags: [memory]
+      summary: Research memory entries and related global proposals
+      parameters:
+        - $ref: '#/components/parameters/ResearchId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Memory snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v2/assistant/memory-proposals/{proposalId}/confirm:
+    post:
+      tags: [memory]
+      summary: Confirm a global preference proposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Confirmed MemoryEntry (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v2/assistant/memory-proposals/{proposalId}/reject:
+    post:
+      tags: [memory]
+      summary: Reject a global preference proposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Rejected proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ResearchId:
+      name: researchId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResearchId'
+    TurnId:
+      name: turnId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/TurnId'
+    ArtifactId:
+      name: artifactId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ArtifactId'
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SourceId'
+    TranscriptJobId:
+      name: transcriptJobId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/TranscriptJobId'
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/MemoryProposalId'
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    ClientVersion:
+      name: X-Client-Version
+      in: header
+      required: false
+      schema:
+        type: string
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Unknown resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: Illegal state, idempotency conflict, or expired SSE cursor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: Rate limited
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unavailable:
+      description: Saturated, V2 disabled, or dependency not ready
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    ResearchId:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    TurnId:
+      type: string
+      pattern: '^vt_[0-9A-HJKMNP-TV-Z]{26}$'
+    MessageId:
+      type: string
+      pattern: '^vm_[0-9A-HJKMNP-TV-Z]{26}$'
+    ArtifactId:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    CitationId:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    TranscriptJobId:
+      type: string
+      pattern: '^tj_[0-9A-HJKMNP-TV-Z]{26}$'
+    MemoryProposalId:
+      type: string
+      pattern: '^mp_[0-9A-HJKMNP-TV-Z]{26}$'
+    MemoryEntryId:
+      type: string
+      pattern: '^me_[0-9A-HJKMNP-TV-Z]{26}$'
+    SourceId:
+      type: string
+      pattern: '^so_[0-9A-HJKMNP-TV-Z]{26}$'
+    GrantAlias:
+      type: string
+      pattern: '^[a-z][a-z0-9-]{0,62}$'
+    Sha256:
+      type: string
+      pattern: '^[a-f0-9]{64}$'
+    TranslationQuality:
+      type: string
+      enum: [fast, quality]
+    TurnMode:
+      type: string
+      enum: [research, content_qa]
+    GrepMode:
+      type: string
+      enum: [literal, regex]
+    GrantPermission:
+      type: string
+      enum: [read, read_write]
+    VirtualUri:
+      type: string
+      minLength: 12
+      maxLength: 1024
+      description: research://... or shared://<alias>/... Never a real filesystem path.
+      pattern: "^(research|shared)://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]*$"
+    ErrorBody:
+      type: object
+      required: [code, message, retryable, traceId]
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+          minLength: 1
+        message:
+          type: string
+        retryable:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        traceId:
+          type: string
+          minLength: 1
+        params:
+          type: object
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+    ClientContext:
+      type: object
+      additionalProperties: false
+      properties:
+        outputLanguage:
+          type: string
+        storefront:
+          type: string
+        locale:
+          type: string
+    ResearchCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        outputLanguage:
+          type: string
+          minLength: 2
+        storefront:
+          type: string
+          minLength: 2
+          maxLength: 2
+        targetLanguage:
+          type: string
+          minLength: 2
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        title:
+          type: string
+          maxLength: 80
+        sharedAliases:
+          type: array
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/GrantAlias'
+    TurnCreateRequest:
+      type: object
+      required: [message, mode]
+      additionalProperties: false
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        mode:
+          $ref: '#/components/schemas/TurnMode'
+        clientContext:
+          $ref: '#/components/schemas/ClientContext'
+    TranscriptionCreateRequest:
+      type: object
+      required: [confirmed, targetLanguage, translationQuality]
+      additionalProperties: false
+      properties:
+        confirmed:
+          type: boolean
+          enum: [true]
+        targetLanguage:
+          type: string
+          minLength: 2
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+    GrepFilesRequest:
+      type: object
+      required: [root, pattern, mode]
+      additionalProperties: false
+      description: Tool input only. Not a REST body. User cannot pass rg flags.
+      properties:
+        root:
+          $ref: '#/components/schemas/VirtualUri'
+        pattern:
+          type: string
+          minLength: 1
+          maxLength: 512
+        mode:
+          $ref: '#/components/schemas/GrepMode'
+        glob:
+          type: string
+          minLength: 1
+          maxLength: 128
+        caseSensitive:
+          type: boolean
+    GrepFilesMatch:
+      type: object
+      required: [uri, line, column, text, truncated]
+      additionalProperties: false
+      properties:
+        uri:
+          $ref: '#/components/schemas/VirtualUri'
+        line:
+          type: integer
+          minimum: 1
+        column:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+          maxLength: 240
+        truncated:
+          type: boolean
+    GrepFilesResult:
+      type: object
+      required: [matches, matchCount, truncated]
+      additionalProperties: false
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/GrepFilesMatch'
+        matchCount:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+    SourceReference:
+      type: object
+      required: [platform, sourceId, canonicalURL]
+      additionalProperties: true
+      properties:
+        platform:
+          type: string
+        sourceId:
+          type: string
+          minLength: 1
+        canonicalURL:
+          type: string
+          format: uri
+        contentKey:
+          nullable: true
+          type: string
+        provider:
+          type: string
+        retrievedAt:
+          type: string
+          format: date-time
+        provenance:
+          type: object
+    WorkspaceGrant:
+      type: object
+      required: [alias, permission, allowedExtensions, maxFileBytes, grantedAt]
+      additionalProperties: true
+      description: Never includes a real server path.
+      properties:
+        alias:
+          $ref: '#/components/schemas/GrantAlias'
+        permission:
+          $ref: '#/components/schemas/GrantPermission'
+        allowedExtensions:
+          type: array
+          items:
+            type: string
+        maxFileBytes:
+          type: integer
+          minimum: 1
+        grantedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          description: ready | unavailable | unknown
+    WorkspaceArtifact:
+      type: object
+      required:
+        - artifactId
+        - researchId
+        - kind
+        - status
+        - mediaType
+        - bytes
+        - sha256
+        - producer
+        - evidenceLevel
+        - createdAt
+        - updatedAt
+      additionalProperties: true
+      description: >-
+        REST artifact summary. Must not include path, relativePath, uri,
+        filename, or any real filesystem location.
+      properties:
+        artifactId:
+          $ref: '#/components/schemas/ArtifactId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        kind:
+          type: string
+          description: >-
+            Known values web_search, web_page, podcast_search, youtube_search,
+            transcript, research_memory, report. Clients must keep unknown.
+        status:
+          type: string
+          description: pending | ready | superseded | failed | corrupt | unknown
+        mediaType:
+          type: string
+        bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          $ref: '#/components/schemas/Sha256'
+        producer:
+          type: string
+        sourceReference:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/SourceReference'
+        evidenceLevel:
+          type: string
+          description: >-
+            search_metadata | primary_content | transcript | research_note |
+            user_preference | unknown
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ArtifactListResponse:
+      type: object
+      required: [artifacts, nextCursor]
+      additionalProperties: false
+      properties:
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceArtifact'
+        nextCursor:
+          nullable: true
+          type: string
+    ArtifactBody:
+      type: object
+      required: [artifact, text, truncated, encoding]
+      additionalProperties: false
+      properties:
+        artifact:
+          $ref: '#/components/schemas/WorkspaceArtifact'
+        text:
+          type: string
+        truncated:
+          type: boolean
+        encoding:
+          type: string
+          enum: [utf-8]
+    EvidenceCitation:
+      type: object
+      required: [citationId, artifactId, evidenceLevel, label, quote]
+      additionalProperties: true
+      properties:
+        citationId:
+          $ref: '#/components/schemas/CitationId'
+        artifactId:
+          $ref: '#/components/schemas/ArtifactId'
+        evidenceLevel:
+          type: string
+        label:
+          type: string
+          maxLength: 120
+        passageId:
+          nullable: true
+          type: string
+        startMilliseconds:
+          nullable: true
+          type: integer
+          minimum: 0
+        endMilliseconds:
+          nullable: true
+          type: integer
+          minimum: 0
+        sourceURL:
+          nullable: true
+          type: string
+          format: uri
+        contentKey:
+          nullable: true
+          type: string
+        quote:
+          type: string
+          maxLength: 240
+        sha256:
+          $ref: '#/components/schemas/Sha256'
+    AssistantMessage:
+      type: object
+      required: [messageId, researchId, turnId, role, markdown, createdAt]
+      additionalProperties: true
+      properties:
+        messageId:
+          $ref: '#/components/schemas/MessageId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        role:
+          type: string
+          enum: [user, assistant, system_summary]
+        markdown:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceCitation'
+        createdAt:
+          type: string
+          format: date-time
+    TurnSummary:
+      type: object
+      required: [turnId, researchId, mode, status, createdAt]
+      additionalProperties: true
+      properties:
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        mode:
+          $ref: '#/components/schemas/TurnMode'
+        status:
+          type: string
+          description: queued | running | completed | failed | cancelled | interrupted | unknown
+        eventsURL:
+          type: string
+        error:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ErrorBody'
+        skillName:
+          type: string
+        skillVersion:
+          type: string
+        skillSha256:
+          $ref: '#/components/schemas/Sha256'
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          nullable: true
+          type: string
+          format: date-time
+        finishedAt:
+          nullable: true
+          type: string
+          format: date-time
+    TurnAcceptedResponse:
+      type: object
+      required: [turnId, researchId, mode, status, eventsURL]
+      additionalProperties: true
+      properties:
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        mode:
+          $ref: '#/components/schemas/TurnMode'
+        status:
+          type: string
+        eventsURL:
+          type: string
+        reused:
+          type: boolean
+    ArtifactCounts:
+      type: object
+      additionalProperties:
+        type: integer
+        minimum: 0
+      properties:
+        web_search:
+          type: integer
+          minimum: 0
+        web_page:
+          type: integer
+          minimum: 0
+        podcast_search:
+          type: integer
+          minimum: 0
+        youtube_search:
+          type: integer
+          minimum: 0
+        transcript:
+          type: integer
+          minimum: 0
+        research_memory:
+          type: integer
+          minimum: 0
+        report:
+          type: integer
+          minimum: 0
+    MemoryEntry:
+      type: object
+      required: [memoryEntryId, scope, type, content, status, createdAt]
+      additionalProperties: true
+      properties:
+        memoryEntryId:
+          $ref: '#/components/schemas/MemoryEntryId'
+        scope:
+          type: string
+          description: research | global | unknown
+        type:
+          type: string
+        content:
+          type: string
+          maxLength: 2000
+        status:
+          type: string
+        sourceArtifactId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ArtifactId'
+        hypothesis:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          nullable: true
+          type: string
+          format: date-time
+    MemoryProposal:
+      type: object
+      required: [proposalId, researchId, content, reason, status, createdAt, expiresAt]
+      additionalProperties: true
+      properties:
+        proposalId:
+          $ref: '#/components/schemas/MemoryProposalId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        content:
+          type: string
+          maxLength: 2000
+        reason:
+          type: string
+          maxLength: 500
+        status:
+          type: string
+          description: pending | confirmed | rejected | expired | unknown
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          nullable: true
+          type: string
+          format: date-time
+        rejectedAt:
+          nullable: true
+          type: string
+          format: date-time
+        memoryEntryId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MemoryEntryId'
+    MemorySnapshot:
+      type: object
+      required: [researchId, entries, proposals]
+      additionalProperties: false
+      properties:
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryEntry'
+        proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryProposal'
+    TranscriptJob:
+      type: object
+      required:
+        - transcriptJobId
+        - researchId
+        - sourceId
+        - contentKey
+        - status
+        - installStatus
+        - progress
+        - updatedAt
+      additionalProperties: true
+      properties:
+        transcriptJobId:
+          $ref: '#/components/schemas/TranscriptJobId'
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        sourceId:
+          $ref: '#/components/schemas/SourceId'
+        contentKey:
+          type: string
+          minLength: 1
+        v10JobId:
+          nullable: true
+          type: string
+        status:
+          type: string
+          description: >-
+            requested | waiting_service | running | installing | ready |
+            failed_retryable | failed_terminal | unknown
+        installStatus:
+          type: string
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        artifactId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ArtifactId'
+        error:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ErrorBody'
+        updatedAt:
+          type: string
+          format: date-time
+    Research:
+      type: object
+      required: [researchId, title, status, workspaceStatus, createdAt, updatedAt]
+      additionalProperties: true
+      properties:
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        title:
+          type: string
+        phase:
+          type: string
+        status:
+          type: string
+          description: creating | ready | deleting | deleted | failed | degraded | corrupt | unknown
+        workspaceStatus:
+          type: string
+        outputLanguage:
+          type: string
+        storefront:
+          type: string
+        targetLanguage:
+          type: string
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        activeTurnId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TurnId'
+        artifactCounts:
+          $ref: '#/components/schemas/ArtifactCounts'
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceGrant'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ResearchListResponse:
+      type: object
+      required: [researches, nextCursor]
+      additionalProperties: false
+      properties:
+        researches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Research'
+        nextCursor:
+          nullable: true
+          type: string
+    ResearchSnapshot:
+      type: object
+      required:
+        - researchId
+        - title
+        - status
+        - workspaceStatus
+        - createdAt
+        - updatedAt
+        - messages
+        - artifacts
+        - grants
+      additionalProperties: true
+      properties:
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        title:
+          type: string
+        phase:
+          type: string
+        status:
+          type: string
+        workspaceStatus:
+          type: string
+        outputLanguage:
+          type: string
+        storefront:
+          type: string
+        targetLanguage:
+          type: string
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantMessage'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceArtifact'
+        memory:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/MemorySnapshot'
+        latestReportArtifactId:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ArtifactId'
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceGrant'
+        activeTurn:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TurnSummary'
+        turnWork:
+          type: array
+          description: >-
+            Per-turn work cards projected from durable v2_events. One entry per
+            turn that streamed thinking or ran tools. Old clients ignore it.
+          items:
+            $ref: '#/components/schemas/TurnWork'
+    TurnWork:
+      type: object
+      required: [turnId, tools]
+      additionalProperties: false
+      properties:
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        durationMs:
+          type: integer
+          minimum: 0
+          nullable: true
+        thinking:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TurnWorkThinking'
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/TurnWorkTool'
+    TurnWorkThinking:
+      type: object
+      required: [status, text, truncated, redacted]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [streaming, done, redacted]
+        durationMs:
+          type: integer
+          minimum: 0
+          nullable: true
+        text:
+          type: string
+          maxLength: 4096
+        truncated:
+          type: boolean
+        redacted:
+          type: boolean
+    TurnWorkTool:
+      type: object
+      required: [callId, tool, labelKey, status]
+      additionalProperties: false
+      properties:
+        callId:
+          type: string
+          minLength: 1
+        tool:
+          type: string
+          minLength: 1
+        labelKey:
+          type: string
+          minLength: 1
+          description: Stable tool name; clients localize the display label.
+        status:
+          type: string
+          enum: [running, completed, failed]
+        query:
+          type: string
+          maxLength: 200
+    SseEventData:
+      type: object
+      required: [schemaVersion, eventId, sequence, researchId, turnId, type, occurredAt, payload]
+      additionalProperties: false
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [2]
+        eventId:
+          type: integer
+          minimum: 1
+        sequence:
+          type: integer
+          minimum: 1
+        researchId:
+          $ref: '#/components/schemas/ResearchId'
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        type:
+          type: string
+          minLength: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+    HealthLiveResponse:
+      type: object
+      required: [status, service, version]
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+          enum: [live]
+        service:
+          type: string
+        version:
+          type: string
+    HealthReadyResponse:
+      type: object
+      required: [status, service, version, checks]
+      additionalProperties: true
+      description: >-
+        checks may include database, workspace, skills, rg, web, v10, qmd.
+        Optional checks (web, qmd) report their own status and must not be
+        omitted or faked as ready when disabled/unavailable.
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        checks:
+          type: object
+          additionalProperties: true

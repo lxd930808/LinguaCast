@@ -211,17 +211,12 @@ struct YTVideoPlayerRouteView: View {
     private var generationProgressText: String? {
         YTSourceGenerationProgressText.title(
             step: video.sourceGenerationStep,
-            progress: video.sourceGenerationProgress,
-            downloadProgress: subtitleState?.audioDownloadProgress,
-            bytesPerSecond: subtitleState?.audioDownloadBytesPerSecond
+            progress: video.sourceGenerationProgress
         )
     }
 
     private var generationProgressValue: Double? {
-        if video.sourceGenerationStep == "downloading" {
-            return subtitleState?.audioDownloadProgress
-        }
-        return video.sourceGenerationProgress
+        video.sourceGenerationProgress
     }
 
     private var labelText: String {

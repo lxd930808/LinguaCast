@@ -20,15 +20,13 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LinguaCastCloudKitContainerIdentifier</key>
-	<string>$(ICLOUD_CONTAINER_IDENTIFIER)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
@@ -75,5 +73,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>LinguaCastOfficialAccountURL</key>
+	<string>$(LINGUACAST_ACCOUNT_URL)</string>
+	<key>LinguaCastContentServiceURL</key>
+	<string>$(LINGUACAST_CONTENT_SERVICE_URL)</string>
+	<key>LinguaCastAssistantServiceURL</key>
+	<string>$(LINGUACAST_ASSISTANT_SERVICE_URL)</string>
 </dict>
 </plist>

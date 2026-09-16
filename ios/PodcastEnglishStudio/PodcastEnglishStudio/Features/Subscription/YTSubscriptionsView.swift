@@ -14,7 +14,6 @@ struct YTSubscriptionsView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showingMobileSetup = false
-    @State private var contentFilter = ContentFilterService()
 
     var body: some View {
         listContent
@@ -111,29 +110,12 @@ struct YTSubscriptionsView: View {
             MobileSetupView()
         }
         .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
             refreshChannels()
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: channels.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
         }
     }
 
     private var visibleChannels: [YTChannelRecord] {
-        channels.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        contentFilter.prefetchAgentVerdicts(channels.map {
-            ContentFilterService.Item(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        })
+        channels
     }
 
     private func channel(for channelID: String) -> YTChannelRecord? {

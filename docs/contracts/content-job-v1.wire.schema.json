@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/contracts/content-job-v1.wire.schema.json",
+  "title": "Content Job API v1 wire schemas",
+  "description": "Machine-checkable JSON Schema mirror of content-job-v1.openapi.yaml. Both files MUST be updated together; the golden fixtures under services/content-pipeline/fixtures/contract are validated against these definitions.",
+  "definitions": {
+    "ContentJobCreateRequest": {
+      "type": "object",
+      "required": ["contentType", "contentKey", "source", "sourceLanguage", "targetLanguage", "translationQuality", "clientArtifactSchemaVersion"],
+      "additionalProperties": false,
+      "properties": {
+        "contentType": { "type": "string", "enum": ["podcast_episode", "video"] },
+        "contentKey": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/definitions/ContentSource" },
+        "sourceLanguage": { "type": "string", "minLength": 2 },
+        "targetLanguage": { "type": "string", "minLength": 2 },
+        "translationQuality": { "type": "string", "enum": ["fast", "quality"] },
+        "clientArtifactSchemaVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ContentSource": {
+      "type": "object",
+      "required": ["platform", "sourceId", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "platform": { "type": "string", "enum": ["rss", "youtube"] },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "feedUrl": { "type": "string", "format": "uri" },
+        "title": { "type": "string" }
+      }
+    },
+    "ContentJobResponse": {
+      "type": "object",
+      "required": ["jobId", "contentType", "contentKey", "sourceLanguage", "targetLanguage", "translationQuality", "pipelineVersion", "status", "progress", "audioReady", "subtitlesReady", "createdAt", "updatedAt", "retryAfterSeconds", "error", "artifacts"],
+      "additionalProperties": true,
+      "properties": {
+        "jobId": { "type": "string", "pattern": "^cj_[A-Za-z0-9]{20,40}$" },
+        "reused": { "type": "boolean" },
+        "contentType": { "type": "string", "enum": ["podcast_episode", "video"] },
+        "contentKey": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/definitions/ContentSource" },
+        "sourceLanguage": { "type": "string" },
+        "targetLanguage": { "type": "string" },
+        "translationQuality": { "type": "string", "enum": ["fast", "quality"] },
+        "pipelineVersion": { "type": "string", "minLength": 1 },
+        "status": { "type": "string" },
+        "stage": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stageProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "audioReady": { "type": "boolean" },
+        "subtitlesReady": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "retryAfterSeconds": { "type": "integer", "minimum": 0 },
+        "error": { "anyOf": [{ "$ref": "#/definitions/ContentJobError" }, { "type": "null" }] },
+        "artifacts": { "anyOf": [{ "$ref": "#/definitions/ArtifactManifestRef" }, { "type": "null" }] }
+      }
+    },
+    "ContentJobError": {
+      "type": "object",
+      "required": ["code", "message", "retryable", "traceId"],
+      "additionalProperties": true,
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retryAfterSeconds": { "type": "integer", "minimum": 0 },
+        "failedStage": { "type": "string" },
+        "traceId": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" }
+      }
+    },
+    "ArtifactManifestRef": {
+      "type": "object",
+      "required": ["schemaVersion", "pipelineVersion", "generatedAt", "audioFingerprint", "files"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1 },
+        "pipelineVersion": { "type": "string" },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "audioFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "audio": { "$ref": "#/definitions/AudioMetadata" },
+        "files": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/ArtifactFileRef" } }
+      }
+    },
+    "ArtifactFileRef": {
+      "type": "object",
+      "required": ["name", "role", "required", "status", "mimeType", "bytes", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "enum": ["segments", "sourceVtt", "targetVtt", "rawTranscript", "audio", "backup"] },
+        "required": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ready", "failed"] },
+        "mimeType": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "etag": { "type": "string" }
+      }
+    },
+    "AudioMetadata": {
+      "type": "object",
+      "required": ["mimeType", "bytes", "durationSeconds", "sha256", "transcoded"],
+      "additionalProperties": false,
+      "properties": {
+        "mimeType": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "durationSeconds": { "type": "number", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "transcoded": { "type": "boolean" }
+      }
+    },
+    "ContentJobLookupResponse": {
+      "type": "object",
+      "required": ["job"],
+      "additionalProperties": false,
+      "properties": {
+        "job": { "anyOf": [{ "$ref": "#/definitions/ContentJobResponse" }, { "type": "null" }] }
+      }
+    },
+    "AudioPlaybackUrlResponse": {
+      "type": "object",
+      "required": ["url", "expiresAt", "mimeType", "bytes", "durationSeconds", "sha256", "acceptRanges"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "mimeType": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "durationSeconds": { "type": "number", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "acceptRanges": { "type": "string", "enum": ["bytes"] }
+      }
+    },
+    "VideoPlaybackUrlRequest": {
+      "type": "object",
+      "required": ["contentType", "contentKey"],
+      "additionalProperties": false,
+      "properties": {
+        "contentType": { "type": "string", "enum": ["video"] },
+        "contentKey": { "type": "string", "minLength": 1 },
+        "preferredHeight": { "type": "integer", "minimum": 144, "maximum": 4320 }
+      }
+    },
+    "VideoPlaybackUrlResponse": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "mediaId",
+        "contentType",
+        "contentKey",
+        "url",
+        "expiresAt",
+        "mimeType",
+        "bytes",
+        "sha256",
+        "durationSeconds",
+        "height",
+        "videoCodec",
+        "audioCodec",
+        "acceptRanges",
+        "mediaVersion",
+        "createdAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1 },
+        "mediaId": { "type": "string", "pattern": "^cm_[A-Za-z0-9]{20,40}$" },
+        "contentType": { "type": "string", "enum": ["video"] },
+        "contentKey": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "mimeType": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "durationSeconds": { "type": "number", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 1 },
+        "videoCodec": { "type": "string", "minLength": 1 },
+        "audioCodec": { "type": "string", "minLength": 1 },
+        "acceptRanges": { "type": "string", "enum": ["bytes"] },
+        "mediaVersion": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": { "$ref": "#/definitions/ContentJobError" }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "MEDIA_INTEGRITY_FAILED",
+    "message": "registered video object failed HEAD verification",
+    "retryable": false,
+    "traceId": "tr_01JFXMEDIA409INTEGRITY"
+  }
+}

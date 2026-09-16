@@ -1,0 +1,11 @@
+// Copy this file to Local.xcconfig (same directory, gitignored) and fill in your own
+// values. Public.xcconfig optionally includes Local.xcconfig, so anything set here
+// overrides the public placeholders without touching tracked files.
+//
+// NB: a bare "//" in an xcconfig value starts a comment and truncates everything
+// after it — write real URLs as https:/$(EMPTY_MACRO)/your-domain.example, same as
+// Public.xcconfig (EMPTY_MACRO is already defined there).
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+LINGUACAST_ACCOUNT_URL = https:/$(EMPTY_MACRO)/example.com
+LINGUACAST_CONTENT_SERVICE_URL = https:/$(EMPTY_MACRO)/example.com
+LINGUACAST_ASSISTANT_SERVICE_URL = https:/$(EMPTY_MACRO)/example.com

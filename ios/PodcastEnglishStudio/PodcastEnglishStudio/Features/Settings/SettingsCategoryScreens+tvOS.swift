@@ -27,6 +27,22 @@ enum TVSettingsCatalog {
                 ])
             )
         }
+        let account = AccountController.shared
+        groups.append(
+            TVSettingsGroup(title: nil, rows: [
+                disclosure(
+                    id: "account",
+                    title: L10n.string("account.section_title", fallback: "Account"),
+                    icon: "person.crop.circle",
+                    help: L10n.string("account.row_help", fallback: "Sign in, view today's free limits, or sign out."),
+                    summary: account.phase == .signedIn
+                        ? AccountFormatting.shortAccountID(account.accountId)
+                        : L10n.string("account.status_signed_out", fallback: "Not signed in"),
+                    route: .category(.account),
+                    identifier: "settings.row.account"
+                )
+            ])
+        )
         groups.append(
             TVSettingsGroup(
                 title: L10n.string("settings.group.icloud_and_setup", fallback: "iCloud and Setup"),
@@ -85,18 +101,6 @@ enum TVSettingsCatalog {
                         summary: settings.configuration.translationTarget.autonym,
                         route: .category(.translation),
                         identifier: "settings.row.translation"
-                    ),
-                    disclosure(
-                        id: "filter",
-                        title: L10n.string("settings.content_filter", fallback: "Content Filter"),
-                        icon: "line.3.horizontal.decrease.circle",
-                        help: L10n.string(
-                            "settings.content_filter_help",
-                            fallback: "Matching episodes and videos are hidden from lists. Keywords apply instantly; the agent instruction uses the configured Translation LLM when available."
-                        ),
-                        summary: SettingsStatusFormatting.onOff(settings.configuration.contentFilterEnabled),
-                        route: .category(.contentFilter),
-                        identifier: "settings.row.content_filter"
                     )
                 ]
             )
@@ -136,18 +140,6 @@ enum TVSettingsCatalog {
             TVSettingsGroup(
                 title: L10n.string("settings.group.other", fallback: "Other"),
                 rows: [
-                    disclosure(
-                        id: "advanced",
-                        title: L10n.string("settings.advanced", fallback: "Advanced"),
-                        icon: "gearshape.2",
-                        help: L10n.string(
-                            "settings.advanced.help",
-                            fallback: "Optional object storage and TTS. Edit these on iPhone."
-                        ),
-                        summary: nil,
-                        route: .category(.advanced),
-                        identifier: "settings.row.advanced"
-                    ),
                     disclosure(
                         id: "about",
                         title: L10n.string("settings.about_diagnostics", fallback: "About and Diagnostics"),
@@ -202,20 +194,117 @@ enum TVSettingsCatalog {
                 localMedia: localMedia,
                 readiness: readiness
             )
+        case .account: return accountModel(account: AccountController.shared)
         case .iCloudSync: return iCloudModel(cloudSync: cloudSync)
         case .setupProgress: return setupModel(readiness: readiness)
         case .cloudService: return cloudModel(settings: settings)
         case .translation: return translationModel(settings: settings)
-        case .contentFilter: return filterModel(settings: settings)
         case .subtitles: return subtitlesModel(settings: settings)
         case .localMedia: return localMediaModel(localMedia: localMedia)
-        case .advanced: return advancedModel(settings: settings)
+        // The on-device OSS/TTS options were removed in V18; the remaining advanced
+        // configuration on Apple TV is the cloud service itself.
+        case .advanced: return cloudModel(settings: settings)
         case .about:
             return aboutModel(
                 settings: settings,
                 cloudActiveJobCount: cloudActiveJobCount
             )
         }
+    }
+
+    static func accountModel(account: AccountController) -> TVSettingsScreenModel {
+        let signInHelp = L10n.string(
+            "account.sign_in_help",
+            fallback: "Sign in with Apple to use cloud transcription, translation and the research assistant. Content already on this device stays playable without signing in."
+        )
+        let quotaHelp = L10n.string("account.quota_help", fallback: "Free daily limits reset at midnight China Standard Time.")
+        var rows: [TVSettingsRowDescriptor] = [
+            infoRow(
+                id: "account-status",
+                title: L10n.string("account.signed_in_as", fallback: "Account ID"),
+                icon: "person.crop.circle",
+                help: signInHelp,
+                value: account.phase == .signedIn
+                    ? AccountFormatting.shortAccountID(account.accountId)
+                    : L10n.string("account.status_signed_out", fallback: "Not signed in"),
+                identifier: "settings.account-status"
+            ),
+            infoRow(
+                id: "account-server",
+                title: L10n.string("account.server", fallback: "Server"),
+                icon: "server.rack",
+                help: L10n.string("account.server_help", fallback: "The server this Apple TV uses for cloud features."),
+                value: AccountFormatting.serverTitle(account.serverKind)
+            )
+        ]
+        if account.phase == .signedIn {
+            if let quota = account.quota {
+                for bucket in quota.buckets {
+                    rows.append(infoRow(
+                        id: "quota-\(bucket.kind)",
+                        title: AccountFormatting.bucketTitle(bucket),
+                        icon: bucket.kind == "media" ? "waveform" : "sparkles",
+                        help: quotaHelp,
+                        value: AccountFormatting.bucketValue(bucket, enforced: quota.enforced)
+                    ))
+                }
+                if quota.enforced {
+                    rows.append(infoRow(
+                        id: "quota-reset",
+                        title: L10n.string("account.quota_resets", fallback: "Resets"),
+                        icon: "clock",
+                        help: quotaHelp,
+                        value: AccountFormatting.resetTime(quota.resetAt)
+                    ))
+                }
+            }
+            rows.append(TVSettingsRowDescriptor(
+                id: "account-sign-out",
+                title: L10n.string("account.sign_out", fallback: "Sign Out"),
+                icon: "rectangle.portrait.and.arrow.right",
+                help: L10n.string("account.row_help", fallback: "Sign in, view today's free limits, or sign out."),
+                kind: .action {},
+                accessibilityIdentifier: "settings.account-sign-out"
+            ))
+            if account.config?.capabilities.accountDeletion == true {
+                rows.append(TVSettingsRowDescriptor(
+                    id: "account-delete",
+                    title: L10n.string("account.delete", fallback: "Delete Account"),
+                    icon: "trash",
+                    help: L10n.string(
+                        "account.delete_confirm_message",
+                        fallback: "This signs you out on all devices and deletes your cloud jobs, research and preferences. Content downloaded to this device is kept."
+                    ),
+                    kind: .action {},
+                    accessibilityIdentifier: "settings.account-delete",
+                    isDestructive: true
+                ))
+            }
+        } else {
+            rows.append(TVSettingsRowDescriptor(
+                id: "account-sign-in",
+                title: L10n.string("account.sign_in_title", fallback: "Sign in to LinguaCast"),
+                icon: "person.crop.circle.badge.plus",
+                help: signInHelp,
+                kind: .action {},
+                accessibilityIdentifier: "settings.account-sign-in"
+            ))
+        }
+        if let message = account.errorMessage {
+            rows.append(infoRow(
+                id: "account-error",
+                title: L10n.string("settings.about.last_error", fallback: "Last Error"),
+                icon: "exclamationmark.triangle",
+                help: message,
+                value: L10n.string("settings.needs_attention", fallback: "Needs attention")
+            ))
+        }
+        return TVSettingsScreenModel(
+            title: L10n.string("account.section_title", fallback: "Account"),
+            defaultIcon: "person.crop.circle",
+            defaultHelp: L10n.string("account.row_help", fallback: "Sign in, view today's free limits, or sign out."),
+            groups: [TVSettingsGroup(title: nil, rows: rows)]
+        )
     }
 
     static func iCloudModel(cloudSync: CloudSyncCoordinator) -> TVSettingsScreenModel {
@@ -311,14 +400,9 @@ enum TVSettingsCatalog {
                 "play.tv"
             ),
             (
-                .dashscopeAPIKey,
-                L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"),
-                "waveform"
-            ),
-            (
-                .translationAPIKey,
-                L10n.string("root.translation_api_key", fallback: "Translation API Key"),
-                "globe"
+                .cloudService,
+                L10n.string("settings.cloud_service", fallback: "Cloud Generation Service"),
+                "cloud.fill"
             )
         ]
         var rows: [TVSettingsRowDescriptor] = [
@@ -382,18 +466,6 @@ enum TVSettingsCatalog {
                         accessory: SettingsStatusFormatting.onOff(configuration.contentServiceEnabled),
                         accessibilityIdentifier: "settings.cloud-enabled"
                     ),
-                    TVSettingsRowDescriptor(
-                        id: "backend",
-                        title: L10n.string("settings.generation_backend", fallback: "Generation Backend"),
-                        icon: "switch.2",
-                        help: L10n.string(
-                            "settings.generation_backend.help",
-                            fallback: "Cloud Service runs generation on your server. On-Device uses keys stored on this device."
-                        ),
-                        kind: .value(.generationBackend),
-                        accessory: backendTitle(configuration.generationBackendMode),
-                        accessibilityIdentifier: "settings.generation-backend"
-                    ),
                     infoRow(
                         id: "status",
                         title: L10n.string("settings.cloud_service_status", fallback: "Status"),
@@ -433,8 +505,6 @@ enum TVSettingsCatalog {
     }
 
     static func translationModel(settings: SettingsStore) -> TVSettingsScreenModel {
-        let cloudHidesLegacy = settings.configuration.generationBackendMode == .cloud
-            && settings.configuration.contentServiceEnabled
         var rows: [TVSettingsRowDescriptor] = [
             infoRow(
                 id: "language",
@@ -448,20 +518,6 @@ enum TVSettingsCatalog {
                 identifier: "settings.translation-language"
             )
         ]
-        if !cloudHidesLegacy {
-            rows.append(
-                infoRow(
-                    id: "provider",
-                    title: L10n.string("settings.provider", fallback: "Provider"),
-                    icon: "building.2",
-                    help: L10n.string(
-                        "settings.provider.help",
-                        fallback: "The on-device translation provider. Change it on iPhone."
-                    ),
-                    value: settings.configuration.translationProvider.capitalized
-                )
-            )
-        }
         rows.append(
             TVSettingsRowDescriptor(
                 id: "quality",
@@ -484,46 +540,6 @@ enum TVSettingsCatalog {
                 fallback: "Translation quality and the current subtitle language."
             ),
             groups: [TVSettingsGroup(title: nil, rows: rows)]
-        )
-    }
-
-    static func filterModel(settings: SettingsStore) -> TVSettingsScreenModel {
-        let keywords = settings.configuration.contentFilterKeywords.trimmingCharacters(in: .whitespacesAndNewlines)
-        return TVSettingsScreenModel(
-            title: L10n.string("settings.content_filter", fallback: "Content Filter"),
-            defaultIcon: "line.3.horizontal.decrease.circle",
-            defaultHelp: L10n.string(
-                "settings.content_filter_help",
-                fallback: "Matching episodes and videos are hidden from lists. Keywords apply instantly; the agent instruction uses the configured Translation LLM when available."
-            ),
-            groups: [
-                TVSettingsGroup(title: nil, rows: [
-                    TVSettingsRowDescriptor(
-                        id: "enabled",
-                        title: L10n.string("settings.content_filter_enabled", fallback: "Enable Content Filter"),
-                        icon: "line.3.horizontal.decrease.circle",
-                        help: L10n.string(
-                            "settings.content_filter_help",
-                            fallback: "Matching episodes and videos are hidden from lists. Keywords apply instantly; the agent instruction uses the configured Translation LLM when available."
-                        ),
-                        kind: .toggle(isOn: settings.configuration.contentFilterEnabled, set: { _ in }),
-                        accessory: SettingsStatusFormatting.onOff(settings.configuration.contentFilterEnabled)
-                    ),
-                    infoRow(
-                        id: "keywords",
-                        title: L10n.string("settings.content_filter_keywords_label", fallback: "Keywords"),
-                        icon: "text.magnifyingglass",
-                        help: L10n.string(
-                            "settings.filter_keywords.help",
-                            fallback: "Edit keywords on iPhone or with Set Up by Phone."
-                        ),
-                        value: keywords.isEmpty
-                            ? L10n.string("settings.none", fallback: "None")
-                            : keywords
-                    ),
-                    mobileSetupRow()
-                ])
-            ]
         )
     }
 
@@ -678,49 +694,6 @@ enum TVSettingsCatalog {
         )
     }
 
-    static func advancedModel(settings: SettingsStore) -> TVSettingsScreenModel {
-        let ossReady = !settings.configuration.ossAccessKeyID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !settings.configuration.ossBucket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let ttsReady = !settings.configuration.minimaxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return TVSettingsScreenModel(
-            title: L10n.string("settings.advanced", fallback: "Advanced"),
-            defaultIcon: "gearshape.2",
-            defaultHelp: L10n.string(
-                "settings.advanced.help",
-                fallback: "Optional object storage and TTS. Edit these on iPhone."
-            ),
-            groups: [
-                TVSettingsGroup(title: nil, rows: [
-                    infoRow(
-                        id: "oss",
-                        title: L10n.string("settings.aliyun_oss_optional", fallback: "Aliyun OSS (optional)"),
-                        icon: "externaldrive",
-                        help: L10n.string(
-                            "settings.oss.help",
-                            fallback: "Transcribed audio is uploaded to DashScope first. OSS is kept for later backup."
-                        ),
-                        value: ossReady
-                            ? L10n.string("settings.configured", fallback: "Configured")
-                            : L10n.string("settings.not_configured", fallback: "Not configured")
-                    ),
-                    infoRow(
-                        id: "tts",
-                        title: L10n.string("settings.optional_tts", fallback: "Optional TTS"),
-                        icon: "waveform",
-                        help: L10n.string(
-                            "settings.tts.help",
-                            fallback: "The first version does not generate Chinese synthesized episodes by default."
-                        ),
-                        value: ttsReady
-                            ? L10n.string("settings.configured", fallback: "Configured")
-                            : L10n.string("settings.not_configured", fallback: "Not configured")
-                    ),
-                    mobileSetupRow()
-                ])
-            ]
-        )
-    }
-
     static func aboutModel(settings: SettingsStore, cloudActiveJobCount: Int) -> TVSettingsScreenModel {
         let error = settings.lastError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return TVSettingsScreenModel(
@@ -780,15 +753,6 @@ enum TVSettingsCatalog {
                 ])
             ]
         )
-    }
-
-    static func backendTitle(_ backend: GenerationBackend) -> String {
-        switch backend {
-        case .cloud:
-            return L10n.string("settings.generation_backend_cloud", fallback: "Cloud Service")
-        case .local:
-            return L10n.string("settings.generation_backend_local", fallback: "On-Device (Legacy)")
-        }
     }
 
     static func qualityTitle(_ raw: String) -> String {

@@ -160,17 +160,6 @@ extension EpisodeDetailView {
                         }
                         .buttonStyle(.borderedProminent)
                         .accessibilityIdentifier("subtitle.cloud-retry")
-                        Button {
-                            runner.generateWithoutCloudCheck(
-                                episode: episode,
-                                context: modelContext,
-                                configuration: settings.configuration
-                            )
-                        } label: {
-                            Label(L10n.string("episodes.generate_bilingual_subtitles", fallback: "Generate bilingual subtitles"), systemImage: "exclamationmark.arrow.triangle.2.circlepath")
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("subtitle.cloud-bypass")
                     } else if processingAction == .retry && cloudGenerationState.retryable {
                         Button {
                             runner.retry(episode: episode, context: modelContext, configuration: settings.configuration)
@@ -274,19 +263,13 @@ extension EpisodeDetailView {
     }
 
     private var podcastConfigurationChecklist: some View {
-        // The cloud backend needs no on-device generation keys; the Settings page
-        // owns the cloud service configuration state (WP14).
+        // Generation runs on the content service (V18); a usable service is the
+        // only requirement, and Settings owns its configuration state.
         VStack(alignment: .leading, spacing: 8) {
-            if !cloudGenerationSelected {
-                configurationRequirement(
-                L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"),
-                isReady: settings.configuration.hasDashScopeASRKey
-            )
             configurationRequirement(
-                L10n.string("settings.translation_api_key", fallback: "Translation API Key"),
-                isReady: settings.configuration.hasTranslationKey
+                L10n.string("settings.cloud_service", fallback: "Cloud Generation Service"),
+                isReady: settings.configuration.isCloudGenerationUsable
             )
-            }
         }
         .font(.caption)
     }
@@ -300,21 +283,10 @@ extension EpisodeDetailView {
     var processingAction: PodcastEpisodeProcessingAction {
         PodcastEpisodeProcessingPolicy.action(
             status: episode.status,
-            // Cloud generation (V10) needs no local DashScope/translation keys.
-            hasGenerationKeys: settings.configuration.hasRequiredGenerationKeys || cloudGenerationReady,
+            // Generation only needs a usable content service (V18).
+            hasGenerationKeys: settings.configuration.isCloudGenerationUsable,
             allowsCloudLookup: true
         )
-    }
-
-    /// True when the cloud backend is selected and fully configured (WP11).
-    var cloudGenerationReady: Bool {
-        settings.configuration.generationBackendMode == .cloud
-            && settings.configuration.isCloudGenerationUsable
-    }
-
-    /// True when the cloud backend is selected, regardless of configuration state.
-    var cloudGenerationSelected: Bool {
-        settings.configuration.generationBackendMode == .cloud
     }
 
     var cloudCheckRequired: Bool {
@@ -342,13 +314,7 @@ extension EpisodeDetailView {
     }
 
     private var settingsDestinationForFailure: SettingsDestination {
-        if cloudGenerationSelected {
-            return .cloudService
-        }
-        if !settings.configuration.hasRequiredGenerationKeys {
-            return .setupProgress
-        }
-        return .root
+        AccountServiceAccess.snapshot == nil ? .account : .cloudService
     }
 
     var progressValue: Double {
@@ -387,7 +353,7 @@ extension EpisodeDetailView {
         CloudContentGenerationState.podcast(
             episode: episode,
             snapshot: cloudJobSnapshot,
-            cloudSelected: cloudGenerationSelected
+            cloudSelected: true
         )
     }
 
@@ -453,7 +419,7 @@ extension EpisodeDetailView {
     /// Queued page title: a submitted cloud job waiting on the server shows
     /// the cloud queue state; otherwise the legacy "ready to process".
     var queuedStateTitle: String {
-        if cloudGenerationSelected, cloudJobSnapshot?.statusRaw == "queued" {
+        if cloudJobSnapshot?.statusRaw == "queued" {
             return L10n.string("cloud.stage.queued", fallback: "Queued on the server")
         }
         return L10n.string("episode_detail.ready_to_process", fallback: "Ready to process")
@@ -462,7 +428,7 @@ extension EpisodeDetailView {
     /// tvOS shelf title: keeps the legacy "Not processed" wording unless the
     /// cloud backend reports a server-side queued job.
     var tvQueuedStateTitle: String {
-        if cloudGenerationSelected, cloudJobSnapshot?.statusRaw == "queued" {
+        if cloudJobSnapshot?.statusRaw == "queued" {
             return L10n.string("cloud.stage.queued", fallback: "Queued on the server")
         }
         return L10n.string("episodes.queuing", fallback: "Not processed")
@@ -472,7 +438,7 @@ extension EpisodeDetailView {
     /// subtitles are still generating (WP14 task 2).
     var cloudAudioReadyHint: String? {
         let state = cloudGenerationState
-        guard cloudGenerationSelected, state.audioReady, !state.subtitlesReady else { return nil }
+        guard state.audioReady, !state.subtitlesReady else { return nil }
         return L10n.string(
             "cloud.audio_ready",
             fallback: "Audio is ready. Bilingual subtitles are still being generated."
@@ -482,7 +448,7 @@ extension EpisodeDetailView {
     /// Last-update timestamp of the in-flight cloud job (WP14 task 1 field).
     @ViewBuilder
     var cloudLastUpdatedText: some View {
-        if cloudGenerationSelected, let lastUpdated = cloudGenerationState.lastUpdated {
+        if let lastUpdated = cloudGenerationState.lastUpdated {
             Text(L10n.format(
                 "cloud.last_updated",
                 fallback: "Last updated %@",
@@ -541,21 +507,19 @@ extension EpisodeDetailView {
             }
             guard FileManager.default.fileExists(atPath: files.segments.fileSystemPath) else {
                 let episodeFiles = try fileStore.episodeFiles(episodeID: episode.id)
-                var localSourceCount = 0
                 if FileManager.default.fileExists(atPath: episodeFiles.rawTranscription.fileSystemPath) {
                     let english = try await readSegments(from: episodeFiles.rawTranscription)
                     guard settings.configuration.translationTarget == target else { return }
                     segments = EpisodePlaybackSegmentPolicy.sorted(english)
-                    localSourceCount = segments.count
                 } else {
                     segments = []
                 }
-                autoResumeTranslation(
-                    configuration: configuration,
-                    hasLocalSource: localSourceCount > 0,
-                    translatedCount: 0,
-                    totalCount: localSourceCount
-                )
+                // Only content without any local transcript is resubmitted automatically;
+                // partial output of the removed on-device pipeline waits for an explicit retry
+                // so opening an episode never silently spends cloud quota on it.
+                if segments.isEmpty {
+                    runner.retry(episode: episode, context: modelContext, configuration: configuration)
+                }
                 return
             }
             let loaded = try await readSegments(from: files.segments)
@@ -574,43 +538,10 @@ extension EpisodeDetailView {
                 variant.totalCount = sorted.count
                 variant.variantStatus = translatedCount == sorted.count ? .ready : .partial
                 try? modelContext.save()
-                if variant.variantStatus != .ready {
-                    autoResumeTranslation(
-                        configuration: configuration,
-                        hasLocalSource: true,
-                        translatedCount: translatedCount,
-                        totalCount: sorted.count
-                    )
-                }
             }
         } catch {
             segments = []
             segmentLoadError = L10n.format("episode.error.read_subtitles", fallback: "Unable to read local subtitle file: %@", error.localizedDescription)
-        }
-    }
-
-    private func autoResumeTranslation(
-        configuration: AppConfiguration,
-        hasLocalSource: Bool,
-        translatedCount: Int,
-        totalCount: Int
-    ) {
-        if PodcastTranslationAutoResumePolicy.shouldBypassCloudCheck(
-            hasLocalSource: hasLocalSource,
-            translatedCount: translatedCount,
-            totalCount: totalCount
-        ) {
-            runner.generateWithoutCloudCheck(
-                episode: episode,
-                context: modelContext,
-                configuration: configuration
-            )
-        } else {
-            runner.retry(
-                episode: episode,
-                context: modelContext,
-                configuration: configuration
-            )
         }
     }
 

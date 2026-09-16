@@ -100,21 +100,20 @@ enum UITestSupport {
         var value = AppConfiguration()
         guard scenario != .firstLaunch, scenario != .podcastQueuedMissingConfiguration else { return value }
         if scenario.usesFakeCloudState {
-            // Fake cloud state (WP14 task 10): the cloud backend is selected
-            // and configured; no DashScope/translation keys exist, proving the
-            // cloud path needs no on-device generation keys. The token value
-            // must never appear in screenshots (settings shows it masked).
+            // Fake cloud state (WP14 task 10): the content service is configured
+            // and no LLM keys exist, proving generation needs no device-side keys.
+            // The token value must never appear in screenshots (settings shows it masked).
             value.youtubeAPIKey = "fixture-youtube"
             value.translationTarget = .simplifiedChinese
             value.contentServiceEnabled = true
             value.contentServiceToken = "fixture-cloud-token"
-            value.generationBackend = GenerationBackend.cloud.rawValue
             applySubtitlePresentationFixtureOverrides(to: &value)
             return value
         }
         value.youtubeAPIKey = "fixture-youtube"
-        value.dashscopeAPIKey = "fixture-dashscope"
-        value.translationAPIKey = "fixture-translation"
+        // V18 generation only needs a usable content service.
+        value.contentServiceEnabled = true
+        value.contentServiceToken = "fixture-cloud-token"
         value.translationTarget = .simplifiedChinese
         applySubtitlePresentationFixtureOverrides(to: &value)
         // LINGUACAST_UI_CLOUD_FIXTURE=1 layers a configured cloud service onto
@@ -122,7 +121,6 @@ enum UITestSupport {
         if ProcessInfo.processInfo.environment["LINGUACAST_UI_CLOUD_FIXTURE"] == "1" {
             value.contentServiceEnabled = true
             value.contentServiceToken = "fixture-cloud-token"
-            value.generationBackend = GenerationBackend.cloud.rawValue
         }
         return value
     }

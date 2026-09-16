@@ -324,7 +324,23 @@ public final class CloudContentJobClient: Sendable {
         return request
     }
 
+    /// Sends the request; after ACCESS_TOKEN_EXPIRED from an account-backed token
+    /// provider the credential is renewed and the request is retried once.
     private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let first = try await transmit(request)
+        guard let http = first.1 as? HTTPURLResponse, http.statusCode == 401,
+              let refreshable = tokenProvider as? RefreshableBearerTokenProviding,
+              AccountErrorCodes.isExpiredAccessToken(first.0),
+              let renewed = try? await refreshable.refreshBearerToken()
+        else {
+            return first
+        }
+        var retry = request
+        retry.setValue("Bearer \(renewed)", forHTTPHeaderField: "Authorization")
+        return try await transmit(retry)
+    }
+
+    private func transmit(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
         } catch let error as URLError {

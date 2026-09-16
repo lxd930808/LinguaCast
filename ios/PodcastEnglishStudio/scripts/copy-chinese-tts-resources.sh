@@ -16,5 +16,5 @@ if [ -f "${resources}/validation-identity.json" ]; then
   ) > "${destination}/synthesis-source.sha256"
 else
   rm -rf "${destination}"
-  echo "warning: Chinese voice resources are not prepared; Chinese playback will be unavailable. See Packages/ChineseTTS/README.md."
+  echo "warning: Chinese voice resources are not prepared; Chinese playback will be unavailable. See tools/kokoro-zh/README.md."
 fi

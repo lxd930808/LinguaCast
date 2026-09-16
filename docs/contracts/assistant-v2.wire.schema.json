@@ -1,0 +1,1403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/contracts/assistant-v2.wire.schema.json",
+  "title": "Assistant API v2 wire schemas",
+  "description": "Machine-checkable JSON Schema mirror of assistant-v2.openapi.yaml. Golden fixtures under services/research-assistant/fixtures/v2-contract and ios/.../Fixtures/AssistantV2 are validated against these definitions. Response enums are open strings so clients can keep an unknown branch.",
+  "definitions": {
+    "ResearchId": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "TurnId": {
+      "type": "string",
+      "pattern": "^vt_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MessageId": {
+      "type": "string",
+      "pattern": "^vm_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "ArtifactId": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "CitationId": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "TranscriptJobId": {
+      "type": "string",
+      "pattern": "^tj_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MemoryProposalId": {
+      "type": "string",
+      "pattern": "^mp_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "MemoryEntryId": {
+      "type": "string",
+      "pattern": "^me_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "SourceId": {
+      "type": "string",
+      "pattern": "^so_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "GrantAlias": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "TranslationQuality": {
+      "type": "string",
+      "enum": [
+        "fast",
+        "quality"
+      ]
+    },
+    "TurnMode": {
+      "type": "string",
+      "enum": [
+        "research",
+        "content_qa"
+      ]
+    },
+    "GrepMode": {
+      "type": "string",
+      "enum": [
+        "literal",
+        "regex"
+      ]
+    },
+    "GrantPermission": {
+      "type": "string",
+      "enum": [
+        "read",
+        "read_write"
+      ]
+    },
+    "VirtualUri": {
+      "type": "string",
+      "pattern": "^(research|shared)://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]*$",
+      "minLength": 12,
+      "maxLength": 1024
+    },
+    "ErrorBody": {
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "traceId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retryAfterSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "traceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/ErrorBody"
+        }
+      }
+    },
+    "ClientContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputLanguage": {
+          "type": "string"
+        },
+        "storefront": {
+          "type": "string"
+        },
+        "locale": {
+          "type": "string"
+        }
+      }
+    },
+    "ResearchCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputLanguage": {
+          "type": "string",
+          "minLength": 2
+        },
+        "storefront": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2
+        },
+        "targetLanguage": {
+          "type": "string",
+          "minLength": 2
+        },
+        "translationQuality": {
+          "$ref": "#/definitions/TranslationQuality"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "sharedAliases": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/definitions/GrantAlias"
+          }
+        }
+      }
+    },
+    "TurnCreateRequest": {
+      "type": "object",
+      "required": [
+        "message",
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "mode": {
+          "$ref": "#/definitions/TurnMode"
+        },
+        "clientContext": {
+          "$ref": "#/definitions/ClientContext"
+        }
+      }
+    },
+    "TranscriptionCreateRequest": {
+      "type": "object",
+      "required": [
+        "confirmed",
+        "targetLanguage",
+        "translationQuality"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "confirmed": {
+          "type": "boolean",
+          "const": true
+        },
+        "targetLanguage": {
+          "type": "string",
+          "minLength": 2
+        },
+        "translationQuality": {
+          "$ref": "#/definitions/TranslationQuality"
+        }
+      }
+    },
+    "GrepFilesRequest": {
+      "type": "object",
+      "required": [
+        "root",
+        "pattern",
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "$ref": "#/definitions/VirtualUri"
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "mode": {
+          "$ref": "#/definitions/GrepMode"
+        },
+        "glob": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "caseSensitive": {
+          "type": "boolean"
+        }
+      }
+    },
+    "GrepFilesMatch": {
+      "type": "object",
+      "required": [
+        "uri",
+        "line",
+        "column",
+        "text",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "$ref": "#/definitions/VirtualUri"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "GrepFilesResult": {
+      "type": "object",
+      "required": [
+        "matches",
+        "matchCount",
+        "truncated"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GrepFilesMatch"
+          }
+        },
+        "matchCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SourceReference": {
+      "type": "object",
+      "required": [
+        "platform",
+        "sourceId",
+        "canonicalURL"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "platform": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonicalURL": {
+          "type": "string",
+          "format": "uri"
+        },
+        "contentKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "retrievedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "provenance": {
+          "type": "object"
+        }
+      }
+    },
+    "WorkspaceGrant": {
+      "type": "object",
+      "required": [
+        "alias",
+        "permission",
+        "allowedExtensions",
+        "maxFileBytes",
+        "grantedAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "alias": {
+          "$ref": "#/definitions/GrantAlias"
+        },
+        "permission": {
+          "$ref": "#/definitions/GrantPermission"
+        },
+        "allowedExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxFileBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "WorkspaceArtifact": {
+      "type": "object",
+      "required": [
+        "artifactId",
+        "researchId",
+        "kind",
+        "status",
+        "mediaType",
+        "bytes",
+        "sha256",
+        "producer",
+        "evidenceLevel",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "artifactId": {
+          "$ref": "#/definitions/ArtifactId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/definitions/Sha256"
+        },
+        "producer": {
+          "type": "string"
+        },
+        "sourceReference": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SourceReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceLevel": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ArtifactListResponse": {
+      "type": "object",
+      "required": [
+        "artifacts",
+        "nextCursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceArtifact"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ArtifactBody": {
+      "type": "object",
+      "required": [
+        "artifact",
+        "text",
+        "truncated",
+        "encoding"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/definitions/WorkspaceArtifact"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8"
+          ]
+        }
+      }
+    },
+    "EvidenceCitation": {
+      "type": "object",
+      "required": [
+        "citationId",
+        "artifactId",
+        "evidenceLevel",
+        "label",
+        "quote"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "citationId": {
+          "$ref": "#/definitions/CitationId"
+        },
+        "artifactId": {
+          "$ref": "#/definitions/ArtifactId"
+        },
+        "evidenceLevel": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "passageId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startMilliseconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endMilliseconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceURL": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quote": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "sha256": {
+          "$ref": "#/definitions/Sha256"
+        }
+      }
+    },
+    "AssistantMessage": {
+      "type": "object",
+      "required": [
+        "messageId",
+        "researchId",
+        "turnId",
+        "role",
+        "markdown",
+        "createdAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "messageId": {
+          "$ref": "#/definitions/MessageId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system_summary"
+          ]
+        },
+        "markdown": {
+          "type": "string"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EvidenceCitation"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "TurnSummary": {
+      "type": "object",
+      "required": [
+        "turnId",
+        "researchId",
+        "mode",
+        "status",
+        "createdAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "mode": {
+          "$ref": "#/definitions/TurnMode"
+        },
+        "status": {
+          "type": "string"
+        },
+        "eventsURL": {
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skillName": {
+          "type": "string"
+        },
+        "skillVersion": {
+          "type": "string"
+        },
+        "skillSha256": {
+          "$ref": "#/definitions/Sha256"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TurnAcceptedResponse": {
+      "type": "object",
+      "required": [
+        "turnId",
+        "researchId",
+        "mode",
+        "status",
+        "eventsURL"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "mode": {
+          "$ref": "#/definitions/TurnMode"
+        },
+        "status": {
+          "type": "string"
+        },
+        "eventsURL": {
+          "type": "string"
+        },
+        "reused": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ArtifactCounts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "properties": {
+        "web_search": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "web_page": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "podcast_search": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "youtube_search": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transcript": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "research_memory": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "report": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "MemoryEntry": {
+      "type": "object",
+      "required": [
+        "memoryEntryId",
+        "scope",
+        "type",
+        "content",
+        "status",
+        "createdAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "memoryEntryId": {
+          "$ref": "#/definitions/MemoryEntryId"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string"
+        },
+        "sourceArtifactId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hypothesis": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "confirmedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MemoryProposal": {
+      "type": "object",
+      "required": [
+        "proposalId",
+        "researchId",
+        "content",
+        "reason",
+        "status",
+        "createdAt",
+        "expiresAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "proposalId": {
+          "$ref": "#/definitions/MemoryProposalId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "confirmedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rejectedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memoryEntryId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MemoryEntryId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MemorySnapshot": {
+      "type": "object",
+      "required": [
+        "researchId",
+        "entries",
+        "proposals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MemoryEntry"
+          }
+        },
+        "proposals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MemoryProposal"
+          }
+        }
+      }
+    },
+    "TranscriptJob": {
+      "type": "object",
+      "required": [
+        "transcriptJobId",
+        "researchId",
+        "sourceId",
+        "contentKey",
+        "status",
+        "installStatus",
+        "progress",
+        "updatedAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "transcriptJobId": {
+          "$ref": "#/definitions/TranscriptJobId"
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "sourceId": {
+          "$ref": "#/definitions/SourceId"
+        },
+        "contentKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "v10JobId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "installStatus": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "artifactId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Research": {
+      "type": "object",
+      "required": [
+        "researchId",
+        "title",
+        "status",
+        "workspaceStatus",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "title": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "workspaceStatus": {
+          "type": "string"
+        },
+        "outputLanguage": {
+          "type": "string"
+        },
+        "storefront": {
+          "type": "string"
+        },
+        "targetLanguage": {
+          "type": "string"
+        },
+        "translationQuality": {
+          "$ref": "#/definitions/TranslationQuality"
+        },
+        "activeTurnId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifactCounts": {
+          "$ref": "#/definitions/ArtifactCounts"
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceGrant"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ResearchListResponse": {
+      "type": "object",
+      "required": [
+        "researches",
+        "nextCursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "researches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Research"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ResearchSnapshot": {
+      "type": "object",
+      "required": [
+        "researchId",
+        "title",
+        "status",
+        "workspaceStatus",
+        "createdAt",
+        "updatedAt",
+        "messages",
+        "artifacts",
+        "grants"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "title": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "workspaceStatus": {
+          "type": "string"
+        },
+        "outputLanguage": {
+          "type": "string"
+        },
+        "storefront": {
+          "type": "string"
+        },
+        "targetLanguage": {
+          "type": "string"
+        },
+        "translationQuality": {
+          "$ref": "#/definitions/TranslationQuality"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AssistantMessage"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceArtifact"
+          }
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MemorySnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestReportArtifactId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceGrant"
+          }
+        },
+        "activeTurn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnWork": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TurnWork"
+          }
+        }
+      }
+    },
+    "SseEventData": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "eventId",
+        "sequence",
+        "researchId",
+        "turnId",
+        "type",
+        "occurredAt",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "eventId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "researchId": {
+          "$ref": "#/definitions/ResearchId"
+        },
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "HealthLiveResponse": {
+      "type": "object",
+      "required": [
+        "status",
+        "service",
+        "version"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "live"
+          ]
+        },
+        "service": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "HealthReadyResponse": {
+      "type": "object",
+      "required": [
+        "status",
+        "service",
+        "version",
+        "checks"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "degraded"
+          ]
+        },
+        "service": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "object"
+        }
+      }
+    },
+    "TurnWorkThinking": {
+      "type": "object",
+      "required": [
+        "status",
+        "text",
+        "truncated",
+        "redacted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "streaming",
+            "done",
+            "redacted"
+          ]
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "TurnWorkTool": {
+      "type": "object",
+      "required": [
+        "callId",
+        "tool",
+        "labelKey",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "callId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labelKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "failed"
+          ]
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "TurnWork": {
+      "type": "object",
+      "required": [
+        "turnId",
+        "tools"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "turnId": {
+          "$ref": "#/definitions/TurnId"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnWorkThinking"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TurnWorkTool"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,242 @@
+# LinguaCast self-hosted stack (V18).
+#
+#  - One Compose project: account service, content pipeline, research assistant (V2),
+#    media service, bgutil PO Token provider and a Caddy HTTPS entry point.
+#  - Only Caddy publishes host ports (80/443). Services reach each other by service
+#    name on the private network; /internal/* routes are never proxied.
+#  - Every value comes from .env (chmod 600). Create it with ./init-env.sh, then
+#    replace the provider placeholders. Check the result before starting:
+#      docker compose -f docker-compose.yml --env-file .env config --quiet
+#  - Each service receives only its own settings, not the whole .env file.
+
+name: linguacast-selfhost
+
+x-service: &service
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  networks:
+    - internal
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  account-service:
+    <<: *service
+    build:
+      context: ../../services/account-service
+    image: linguacast-account-service:v18
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    environment:
+      NODE_ENV: production
+      ACCOUNT_HOST: 0.0.0.0
+      ACCOUNT_BIND_ALL_INTERFACES: "1"
+      ACCOUNT_PORT: "3240"
+      ACCOUNT_DATABASE_PATH: /var/lib/linguacast-account/data/account.db
+      ACCOUNT_TRUST_PROXY: "1"
+      # Purge targets are on the private network, so plain HTTP is accepted here.
+      ACCOUNT_ALLOW_INSECURE_UPSTREAM: "1"
+      AUTH_MODE: ${AUTH_MODE:?set AUTH_MODE to selfhost or apple (run init-env.sh)}
+      SELFHOST_ACCESS_TOKEN: ${SELFHOST_ACCESS_TOKEN:-}
+      ACCOUNT_INTERNAL_TOKENS: ${ACCOUNT_INTERNAL_TOKENS:?run init-env.sh}
+      ACCOUNT_PURGE_TARGETS: content=http://content-pipeline:3220,assistant=http://research-assistant:3230,media=http://media-service:3210
+      ACCOUNT_PURGE_TOKEN: ${ACCOUNT_PURGE_TOKEN:?run init-env.sh}
+      PUBLIC_ACCOUNT_BASE_URL: https://${ACCOUNT_DOMAIN:?set ACCOUNT_DOMAIN}
+      PUBLIC_CONTENT_BASE_URL: https://${CONTENT_DOMAIN:?set CONTENT_DOMAIN}
+      PUBLIC_ASSISTANT_BASE_URL: https://${ASSISTANT_DOMAIN:?set ASSISTANT_DOMAIN}
+      PUBLIC_MEDIA_BASE_URL: https://${MEDIA_DOMAIN:?set MEDIA_DOMAIN}
+      CAPABILITY_VIDEO_MEDIA: ${CAPABILITY_VIDEO_MEDIA:-1}
+      QUOTA_MEDIA_SECONDS_PER_DAY: ${QUOTA_MEDIA_SECONDS_PER_DAY:-1800}
+      QUOTA_ASSISTANT_TURNS_PER_DAY: ${QUOTA_ASSISTANT_TURNS_PER_DAY:-20}
+      QUOTA_MEDIA_CONCURRENCY: ${QUOTA_MEDIA_CONCURRENCY:-1}
+      QUOTA_ASSISTANT_CONCURRENCY: ${QUOTA_ASSISTANT_CONCURRENCY:-1}
+      # Apple mode only; ignored when AUTH_MODE=selfhost.
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
+      APPLE_KEY_ID: ${APPLE_KEY_ID:-}
+      APPLE_CLIENT_IDS: ${APPLE_CLIENT_IDS:-}
+      APPLE_TOKEN_ENCRYPTION_KEY: ${APPLE_TOKEN_ENCRYPTION_KEY:-}
+      APPLE_PRIVATE_KEY_PATH: /run/linguacast-secrets/apple-sign-in-key.p8
+    volumes:
+      - account-data:/var/lib/linguacast-account/data
+      - ./secrets:/run/linguacast-secrets:ro
+
+  content-pipeline:
+    <<: *service
+    build:
+      context: ../../services/content-pipeline
+    image: linguacast-content-pipeline:v18
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    depends_on:
+      - account-service
+      - media-service
+    environment:
+      NODE_ENV: production
+      CONTENT_HOST: 0.0.0.0
+      CONTENT_BIND_ALL_INTERFACES: "1"
+      CONTENT_PORT: "3220"
+      CONTENT_DATABASE_PATH: /var/lib/linguacast-content/data/content.db
+      CONTENT_TEMP_ROOT: /var/lib/linguacast-content/tmp
+      CONTENT_IDENTITY_MODE: ${CONTENT_IDENTITY_MODE:?run init-env.sh}
+      CONTENT_SERVICE_TOKEN: ${CONTENT_SERVICE_TOKEN:-}
+      ACCOUNT_SERVICE_URL: http://account-service:3240
+      CONTENT_ACCOUNT_TOKEN: ${CONTENT_ACCOUNT_TOKEN:-}
+      CONTENT_INTERNAL_CALLERS: ${CONTENT_INTERNAL_CALLERS:-}
+      ACCOUNT_CONTEXT_SIGNING_KEY: ${ACCOUNT_CONTEXT_SIGNING_KEY:-}
+      CONTENT_GLOBAL_CONCURRENCY: ${CONTENT_GLOBAL_CONCURRENCY:-1}
+      CONTENT_ACCOUNT_CONCURRENCY: ${CONTENT_ACCOUNT_CONCURRENCY:-1}
+      MEDIA_API_BASE_URL: http://media-service:3210
+      MEDIA_API_TOKEN: ${CONTENT_MEDIA_API_TOKEN:?run init-env.sh}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?set DASHSCOPE_API_KEY}
+      TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-deepseek}
+      TRANSLATION_API_KEY: ${TRANSLATION_API_KEY:?set TRANSLATION_API_KEY}
+      TRANSLATION_MODEL: ${TRANSLATION_MODEL:-deepseek-v4-flash}
+      TRANSLATION_REASONING_EFFORT: ${TRANSLATION_REASONING_EFFORT:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?set R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?set R2_SECRET_ACCESS_KEY}
+      R2_BUCKET: ${R2_BUCKET:?set R2_BUCKET}
+      R2_PREFIX: ${R2_PREFIX:-content-pipeline}
+      R2_ENVIRONMENT: ${R2_ENVIRONMENT:-prod}
+    volumes:
+      - content-data:/var/lib/linguacast-content/data
+      - content-tmp:/var/lib/linguacast-content/tmp
+
+  research-assistant:
+    <<: *service
+    build:
+      context: ../../services/research-assistant
+    image: linguacast-research-assistant:v18
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    depends_on:
+      - account-service
+      - content-pipeline
+    environment:
+      NODE_ENV: production
+      ASSISTANT_HOST: 0.0.0.0
+      ASSISTANT_BIND_ALL_INTERFACES: "1"
+      ASSISTANT_PORT: "3230"
+      ASSISTANT_DATABASE_PATH: /var/lib/linguacast-assistant/data/assistant.db
+      ASSISTANT_TEMP_ROOT: /var/lib/linguacast-assistant/tmp
+      ASSISTANT_WORKSPACE_ROOT: /var/lib/linguacast-assistant/workspaces
+      ASSISTANT_GLOBAL_MEMORY_ROOT: /var/lib/linguacast-assistant/global-memory
+      ASSISTANT_SHARED_VERSION_ROOT: /var/lib/linguacast-assistant/shared-versions
+      ASSISTANT_RG_PATH: rg
+      PI_CONFIG_DIR: /var/lib/linguacast-assistant/pi
+      PI_AUTH_PATH: /var/lib/linguacast-assistant/pi/auth.json
+      ASSISTANT_IDENTITY_MODE: ${ASSISTANT_IDENTITY_MODE:?run init-env.sh}
+      ASSISTANT_SERVICE_TOKEN: ${ASSISTANT_SERVICE_TOKEN:-}
+      ACCOUNT_SERVICE_URL: http://account-service:3240
+      ASSISTANT_ACCOUNT_TOKEN: ${ASSISTANT_ACCOUNT_TOKEN:-}
+      ASSISTANT_INTERNAL_CALLERS: ${ASSISTANT_INTERNAL_CALLERS:-}
+      ACCOUNT_CONTEXT_SIGNING_KEY: ${ACCOUNT_CONTEXT_SIGNING_KEY:-}
+      # The content pipeline is on the private network, so plain HTTP is accepted here.
+      ASSISTANT_ALLOW_INSECURE_UPSTREAM: "1"
+      V10_BASE_URL: http://content-pipeline:3220
+      V10_SERVICE_TOKEN: ${ASSISTANT_CONTENT_TOKEN:?run init-env.sh}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      ASSISTANT_GLOBAL_PI_TURNS: ${ASSISTANT_GLOBAL_PI_TURNS:-1}
+      ASSISTANT_ACCOUNT_TURNS: ${ASSISTANT_ACCOUNT_TURNS:-1}
+      ASSISTANT_WEB_ENABLED: "0"
+      ASSISTANT_SHARED_WRITE_ENABLED: "0"
+    volumes:
+      - assistant-data:/var/lib/linguacast-assistant/data
+      - assistant-tmp:/var/lib/linguacast-assistant/tmp
+      - assistant-workspaces:/var/lib/linguacast-assistant/workspaces
+      - assistant-global-memory:/var/lib/linguacast-assistant/global-memory
+      - assistant-shared-versions:/var/lib/linguacast-assistant/shared-versions
+      # models.json is read-only; auth.json must be writable because Pi refreshes
+      # OAuth credentials in place (mode 600, owned by uid 1000).
+      - ./pi-config/models.json:/var/lib/linguacast-assistant/pi/models.json:ro
+      - ./pi-config/auth.json:/var/lib/linguacast-assistant/pi/auth.json
+
+  media-service:
+    <<: *service
+    build:
+      context: ../../tools/local-youtube-media-service
+      args:
+        YTDLP_VERSION: ${YTDLP_VERSION:-2026.08.19}
+        BGUTIL_POT_PROVIDER_VERSION: ${BGUTIL_POT_PROVIDER_VERSION:-}
+    image: linguacast-media-service:v18
+    user: node
+    depends_on:
+      - pot-provider
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3210"
+      PUBLIC_BASE_URL: https://${MEDIA_DOMAIN:?set MEDIA_DOMAIN}
+      MEDIA_ROOT: /data/media
+      POT_BASE_URL: http://pot-provider:4416
+      MEDIA_IDENTITY_MODE: ${MEDIA_IDENTITY_MODE:?run init-env.sh}
+      AUTH_TOKEN: ${MEDIA_AUTH_TOKEN:-}
+      ACCOUNT_SERVICE_URL: http://account-service:3240
+      MEDIA_ACCOUNT_TOKEN: ${MEDIA_ACCOUNT_TOKEN:-}
+      MEDIA_INTERNAL_CALLERS: ${MEDIA_INTERNAL_CALLERS:-}
+      ACCOUNT_CONTEXT_SIGNING_KEY: ${ACCOUNT_CONTEXT_SIGNING_KEY:-}
+      MEDIA_URL_SIGNING_KEY: ${MEDIA_URL_SIGNING_KEY:?run init-env.sh}
+      PREFERRED_HEIGHT: ${MEDIA_PREFERRED_HEIGHT:-720}
+      MAX_CONCURRENT_JOBS: "1"
+      MIN_FREE_BYTES: ${MEDIA_MIN_FREE_BYTES:-5368709120}
+      # Optional Cloudflare R2 for media playback; all four must be set to enable it.
+      R2_ACCOUNT_ID: ${MEDIA_R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${MEDIA_R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${MEDIA_R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${MEDIA_R2_BUCKET:-}
+    volumes:
+      - media-data:/data/media
+
+  pot-provider:
+    <<: *service
+    image: brainicism/bgutil-ytdlp-pot-provider:${BGUTIL_POT_PROVIDER_VERSION:-latest}
+
+  caddy:
+    <<: *service
+    image: caddy:${CADDY_VERSION:-2.8.4}-alpine
+    cap_add:
+      - NET_BIND_SERVICE
+    depends_on:
+      - account-service
+      - content-pipeline
+      - research-assistant
+      - media-service
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACCOUNT_DOMAIN: ${ACCOUNT_DOMAIN:?set ACCOUNT_DOMAIN}
+      CONTENT_DOMAIN: ${CONTENT_DOMAIN:?set CONTENT_DOMAIN}
+      ASSISTANT_DOMAIN: ${ASSISTANT_DOMAIN:?set ASSISTANT_DOMAIN}
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN:?set MEDIA_DOMAIN}
+      CADDY_TLS: ${CADDY_TLS:?set CADDY_TLS to an ACME e-mail address or internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+networks:
+  internal: {}
+
+volumes:
+  account-data:
+  content-data:
+  content-tmp:
+  assistant-data:
+  assistant-tmp:
+  assistant-workspaces:
+  assistant-global-memory:
+  assistant-shared-versions:
+  media-data:
+  caddy-data:
+  caddy-config:

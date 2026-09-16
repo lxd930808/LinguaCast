@@ -1,0 +1,814 @@
+openapi: 3.0.3
+info:
+  title: LinguaCast Account Service API v1
+  version: 1.0.0-draft
+  description: >-
+    V18 account service contract (proposed; frozen by V18 WP01, implemented by
+    WP02/WP04). Owns identity (Sign in with Apple or self-host single-user
+    token), App-issued sessions, per-account configuration and the daily quota
+    ledger. Business services (content pipeline, research assistant, media
+    service) never trust client-supplied identity; they resolve every public
+    request through the internal introspection endpoint. This document,
+    account-v1-errors.md and account-v1-integration.md are the single source
+    of truth. Paths under /internal/ MUST NOT be routed by any public reverse
+    proxy.
+  contact:
+    name: LinguaCast V18
+servers:
+  - url: https://account.example.com
+    description: Deployment-specific public entry (official or self-host)
+tags:
+  - name: auth
+    description: Sign in with Apple challenge/exchange and App session lifecycle
+  - name: me
+    description: Per-account configuration, quota snapshot and account deletion
+  - name: internal-auth
+    description: Service-to-service credential introspection (never publicly routed)
+  - name: internal-quota
+    description: Service-to-service quota reservation and settlement (never publicly routed)
+  - name: health
+    description: Unauthenticated liveness and readiness probes
+security:
+  - accessToken: []
+paths:
+  /v1/auth/apple/challenge:
+    post:
+      operationId: createAppleChallenge
+      tags: [auth]
+      summary: Create a short-lived, single-use Sign in with Apple nonce challenge
+      description: >-
+        The client passes `nonce` verbatim as ASAuthorizationAppleIDRequest.nonce.
+        The challenge expires after ACCOUNT_CHALLENGE_TTL_SECONDS (default 300)
+        and is consumed by the first exchange attempt, successful or not.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppleChallengeRequest'
+      responses:
+        '201':
+          description: Challenge created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppleChallengeResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+  /v1/auth/apple/exchange:
+    post:
+      operationId: exchangeAppleCredential
+      tags: [auth]
+      summary: Verify challenge + Apple identityToken + authorizationCode and issue an App session
+      description: >-
+        The server verifies the identity token signature against Apple JWKS,
+        `iss`, `aud` (one of the configured App IDs), `exp`/`iat`, and that the
+        `nonce` claim equals the stored challenge nonce. The authorization code
+        is redeemed with Apple so the Apple refresh token can be revoked on
+        account deletion. Accounts are keyed by Apple `sub`, never by email.
+        The Apple identity token is never accepted as a business credential.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppleExchangeRequest'
+      responses:
+        '200':
+          description: Session issued (existing or newly created account)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTokens'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /v1/auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [auth]
+      summary: Rotate the refresh credential and issue a new access token
+      description: >-
+        Every successful call invalidates the presented refresh token. Presenting
+        an already-rotated refresh token revokes the whole session family
+        (REFRESH_TOKEN_REUSED), except inside the retry grace window described in
+        account-v1-integration.md. Clients MUST single-flight refresh per session.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTokens'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Revoke the current session (access and refresh credentials)
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: Session revoked (idempotent; an already revoked session also returns 204)
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/me/config:
+    get:
+      operationId: getMyConfig
+      tags: [me]
+      summary: Service endpoints, capabilities and account summary for the caller
+      description: >-
+        Never contains service-to-service tokens, object storage credentials or
+        model provider keys. Works for both Apple sessions and the self-host
+        deployment token.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Configuration for this account and deployment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeConfig'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+  /v1/me/quota:
+    get:
+      operationId: getMyQuota
+      tags: [me]
+      summary: Daily limits, usage, reservations, reset time and concurrency state
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Quota snapshot for the current Asia/Shanghai period
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaSnapshot'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+  /v1/me:
+    delete:
+      operationId: deleteMyAccount
+      tags: [me]
+      summary: Revoke all sessions, disable the account and start user data deletion
+      description: >-
+        Returns once the account is disabled and every session is revoked; the
+        cross-service purge continues asynchronously and is retried until each
+        service reports completion. Not available in self-host single-user mode.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKeyOptional'
+      responses:
+        '202':
+          description: Deletion accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDeletionAccepted'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /internal/v1/auth/introspect:
+    post:
+      operationId: introspectToken
+      tags: [internal-auth]
+      summary: Resolve a public access credential into a trusted RequestIdentity
+      description: >-
+        Called by business services for every public request. Official mode
+        results are not cached by callers so revocation is immediate. Inactive
+        credentials return 200 with active=false rather than an error.
+      security:
+        - internalServiceToken: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntrospectRequest'
+      responses:
+        '200':
+          description: Introspection result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntrospectResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /internal/v1/quota/reservations:
+    post:
+      operationId: createReservation
+      tags: [internal-quota]
+      summary: Atomically reserve quota for one logical operation, or return the existing reservation
+      description: >-
+        (accountId, kind, operationKey) is unique. Repeating the same request
+        returns the existing reservation with 200 in any status. Reusing the key
+        with a different amount returns IDEMPOTENCY_CONFLICT. The period is the
+        Asia/Shanghai calendar date at the moment the reservation is created.
+      security:
+        - internalServiceToken: []
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
+      responses:
+        '200':
+          description: Existing reservation for this operation (no additional charge)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '201':
+          description: New reservation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+        '429':
+          $ref: '#/components/responses/Error'
+  /internal/v1/quota/reservations/{reservationId}:
+    get:
+      operationId: getReservation
+      tags: [internal-quota]
+      summary: Read one reservation (restart reconciliation)
+      security:
+        - internalServiceToken: []
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Reservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /internal/v1/quota/reservations/{reservationId}/settle:
+    post:
+      operationId: settleReservation
+      tags: [internal-quota]
+      summary: Idempotently consume (success) or release (failure/cancel/reuse) a reservation
+      description: >-
+        The first settlement wins. Repeating the same outcome returns 200 with
+        the unchanged reservation. A different outcome after settlement returns
+        RESERVATION_ALREADY_SETTLED with the stored reservation in params.
+      security:
+        - internalServiceToken: []
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationSettleRequest'
+      responses:
+        '200':
+          description: Reservation after settlement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /v1/account-health/live:
+    get:
+      operationId: getLiveness
+      tags: [health]
+      summary: Liveness probe (no dependencies, no auth)
+      security: []
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /v1/account-health/ready:
+    get:
+      operationId: getReadiness
+      tags: [health]
+      summary: Readiness probe (database, migrations, Apple configuration presence)
+      security: []
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      description: >-
+        Opaque App access token (prefix lca_) issued by exchange/refresh, or the
+        self-host deployment token when AUTH_MODE=selfhost. Only its SHA-256 is
+        stored server-side.
+    internalServiceToken:
+      type: http
+      scheme: bearer
+      description: >-
+        Service-to-service credential held by business services only. Never
+        issued to clients and never accepted on public routes.
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^qr_[0-9A-HJKMNP-TV-Z]{26}$'
+  responses:
+    Error:
+      description: Error envelope (see account-v1-errors.md)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    Platform:
+      type: string
+      enum: [ios, ipados, tvos]
+    AuthMode:
+      type: string
+      enum: [apple, selfhost]
+    AccountStatus:
+      type: string
+      enum: [active, disabled, deleting]
+    QuotaKind:
+      type: string
+      enum: [media, assistant]
+    AppleChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [platform]
+      properties:
+        platform:
+          $ref: '#/components/schemas/Platform'
+        clientVersion:
+          type: string
+          maxLength: 32
+    AppleChallengeResponse:
+      type: object
+      additionalProperties: false
+      required: [challengeId, nonce, expiresAt]
+      properties:
+        challengeId:
+          type: string
+          pattern: '^ach_[0-9A-HJKMNP-TV-Z]{26}$'
+        nonce:
+          type: string
+          minLength: 32
+          maxLength: 128
+          description: Pass verbatim as the Apple authorization request nonce.
+        expiresAt:
+          type: string
+          format: date-time
+    AppleExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [challengeId, identityToken, authorizationCode, platform]
+      properties:
+        challengeId:
+          type: string
+          pattern: '^ach_[0-9A-HJKMNP-TV-Z]{26}$'
+        identityToken:
+          type: string
+          minLength: 16
+          maxLength: 8192
+        authorizationCode:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        platform:
+          $ref: '#/components/schemas/Platform'
+        deviceName:
+          type: string
+          maxLength: 80
+          description: Optional user-visible device label for session management.
+        clientVersion:
+          type: string
+          maxLength: 32
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 16
+          maxLength: 256
+    SessionTokens:
+      type: object
+      additionalProperties: false
+      required: [accessToken, accessTokenExpiresAt, refreshToken, sessionExpiresAt, sessionId, account]
+      properties:
+        accessToken:
+          type: string
+          description: Opaque, prefix lca_. Default lifetime 900 seconds.
+        accessTokenExpiresAt:
+          type: string
+          format: date-time
+        refreshToken:
+          type: string
+          description: Opaque, prefix lcr_. Single use; store in Keychain only.
+        sessionExpiresAt:
+          type: string
+          format: date-time
+          description: Absolute session end (default 30 days after exchange); refresh never extends it.
+        sessionId:
+          type: string
+          pattern: '^ses_[0-9A-HJKMNP-TV-Z]{26}$'
+        account:
+          $ref: '#/components/schemas/AccountSummary'
+    AccountSummary:
+      type: object
+      additionalProperties: false
+      required: [accountId, authMode, status, createdAt]
+      properties:
+        accountId:
+          type: string
+          description: acc_<ULID> for Apple accounts; the fixed value selfhost in single-user mode.
+          pattern: '^(acc_[0-9A-HJKMNP-TV-Z]{26}|selfhost)$'
+        authMode:
+          $ref: '#/components/schemas/AuthMode'
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        createdAt:
+          type: string
+          format: date-time
+    ServiceEndpoints:
+      type: object
+      additionalProperties: false
+      required: [accountBaseUrl, contentBaseUrl, assistantBaseUrl]
+      properties:
+        accountBaseUrl:
+          type: string
+          format: uri
+        contentBaseUrl:
+          type: string
+          format: uri
+        assistantBaseUrl:
+          type: string
+          format: uri
+        mediaBaseUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Present only when clients call the media service directly.
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [contentJobs, assistantV2, videoMedia, quota, accountDeletion]
+      properties:
+        contentJobs:
+          type: boolean
+        assistantV2:
+          type: boolean
+        videoMedia:
+          type: boolean
+        quota:
+          type: boolean
+          description: False in self-host deployments that disable quota enforcement.
+        accountDeletion:
+          type: boolean
+    MeConfig:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, account, services, capabilities, limits]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        account:
+          $ref: '#/components/schemas/AccountSummary'
+        services:
+          $ref: '#/components/schemas/ServiceEndpoints'
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
+        limits:
+          type: object
+          additionalProperties: false
+          required: [maxMediaDurationSeconds]
+          properties:
+            maxMediaDurationSeconds:
+              type: integer
+              minimum: 1
+    QuotaBucket:
+      type: object
+      additionalProperties: false
+      required: [kind, unit, limit, used, reserved, remaining]
+      properties:
+        kind:
+          $ref: '#/components/schemas/QuotaKind'
+        unit:
+          type: string
+          enum: [seconds, turns]
+        limit:
+          type: integer
+          minimum: 0
+        used:
+          type: integer
+          minimum: 0
+          description: Sum of consumed reservations in this period.
+        reserved:
+          type: integer
+          minimum: 0
+          description: Sum of reservations still in status reserved in this period.
+        remaining:
+          type: integer
+          minimum: 0
+          description: max(0, limit - used - reserved)
+    ConcurrencyState:
+      type: object
+      additionalProperties: false
+      required: [kind, limit, running, queued]
+      properties:
+        kind:
+          $ref: '#/components/schemas/QuotaKind'
+        limit:
+          type: integer
+          minimum: 1
+        running:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+    QuotaSnapshot:
+      type: object
+      additionalProperties: false
+      required: [timezone, periodKey, resetAt, enforced, buckets, concurrency]
+      properties:
+        timezone:
+          type: string
+          enum: [Asia/Shanghai]
+        periodKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+        resetAt:
+          type: string
+          format: date-time
+        enforced:
+          type: boolean
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaBucket'
+        concurrency:
+          type: array
+          description: Best-effort view; task services are authoritative for their own queues.
+          items:
+            $ref: '#/components/schemas/ConcurrencyState'
+    AccountDeletionAccepted:
+      type: object
+      additionalProperties: false
+      required: [deletionId, status, requestedAt]
+      properties:
+        deletionId:
+          type: string
+          pattern: '^del_[0-9A-HJKMNP-TV-Z]{26}$'
+        status:
+          type: string
+          enum: [pending, in_progress, completed]
+        requestedAt:
+          type: string
+          format: date-time
+    IntrospectRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 8
+          maxLength: 256
+    IntrospectResponse:
+      type: object
+      additionalProperties: false
+      required: [active]
+      properties:
+        active:
+          type: boolean
+        inactiveReason:
+          type: string
+          enum: [unknown, expired, revoked, account_disabled, account_deleting]
+        identity:
+          $ref: '#/components/schemas/RequestIdentity'
+    RequestIdentity:
+      type: object
+      additionalProperties: false
+      required: [accountId, authMode, sessionId]
+      properties:
+        accountId:
+          type: string
+          pattern: '^(acc_[0-9A-HJKMNP-TV-Z]{26}|selfhost)$'
+        authMode:
+          $ref: '#/components/schemas/AuthMode'
+        sessionId:
+          type: string
+          nullable: true
+          description: Null in self-host single-user mode.
+    ReservationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [accountId, kind, operationKey, amount, service]
+      properties:
+        accountId:
+          type: string
+          pattern: '^(acc_[0-9A-HJKMNP-TV-Z]{26}|selfhost)$'
+        kind:
+          $ref: '#/components/schemas/QuotaKind'
+        operationKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '^[A-Za-z0-9:._-]+$'
+          description: Stable logical operation ID, e.g. content-job:<jobId> or assistant-turn:<turnId>.
+        amount:
+          type: integer
+          minimum: 1
+          description: Whole seconds (ceil of probed duration) for media, turns for assistant.
+        service:
+          type: string
+          enum: [content-pipeline, research-assistant, media-service]
+        subjectRef:
+          type: string
+          maxLength: 200
+          description: Diagnostic reference to the task row; not used for uniqueness.
+    ReservationSettleRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome, reason]
+      properties:
+        outcome:
+          type: string
+          enum: [consumed, released]
+        reason:
+          type: string
+          enum: [succeeded, failed, cancelled, reused_artifact, rejected_before_start, account_deleted]
+    Reservation:
+      type: object
+      additionalProperties: false
+      required: [reservationId, accountId, kind, operationKey, amount, periodKey, status, service, createdAt]
+      properties:
+        reservationId:
+          type: string
+          pattern: '^qr_[0-9A-HJKMNP-TV-Z]{26}$'
+        accountId:
+          type: string
+        kind:
+          $ref: '#/components/schemas/QuotaKind'
+        operationKey:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        periodKey:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+        status:
+          type: string
+          enum: [reserved, consumed, released]
+        reason:
+          type: string
+          nullable: true
+        service:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        settledAt:
+          type: string
+          format: date-time
+          nullable: true
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, traceId]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        params:
+          type: object
+          additionalProperties: true
+        traceId:
+          type: string
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+    HealthResponse:
+      type: object
+      additionalProperties: true
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+        version:
+          type: string

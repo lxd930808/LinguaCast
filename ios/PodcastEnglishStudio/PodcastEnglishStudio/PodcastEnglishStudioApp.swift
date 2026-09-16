@@ -79,6 +79,7 @@ struct PodcastEnglishStudioApp: App {
                 .environment(cloudSync)
                 .environment(catalogRecovery)
                 .environment(settingsNavigation)
+                .environment(AccountController.shared)
                 .onOpenURL { url in
                     #if os(iOS)
                     _ = PlaybackDeepLinkCoordinator.shared.handle(url)

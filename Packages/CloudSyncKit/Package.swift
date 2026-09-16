@@ -33,10 +33,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CloudSyncKitTests",
-            dependencies: [
-                "CloudSyncKit",
-                .product(name: "PodcastEnglishStudioCore", package: "PodcastEnglishStudio")
-            ],
+            dependencies: ["CloudSyncKit"],
             path: "Tests/CloudSyncKitTests"
         )
     ]

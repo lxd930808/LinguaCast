@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/contracts/assistant-workspace-manifest-v1.schema.json",
+  "title": "Assistant workspace manifest v1",
+  "description": "On-disk manifest.json for a V2 Research workspace. relativePath is workspace-relative and never appears on the artifact REST wire.",
+  "type": "object",
+  "required": ["schemaVersion", "researchId", "createdAt", "updatedAt", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "researchId": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ManifestArtifact" }
+    }
+  },
+  "definitions": {
+    "ManifestArtifact": {
+      "type": "object",
+      "required": [
+        "artifactId",
+        "kind",
+        "status",
+        "relativePath",
+        "mediaType",
+        "bytes",
+        "sha256",
+        "createdAt",
+        "producer",
+        "evidenceLevel"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "web_search",
+            "web_page",
+            "podcast_search",
+            "youtube_search",
+            "transcript",
+            "research_memory",
+            "report"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "ready", "superseded", "failed", "corrupt"]
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(manifest\\.json|sources|transcripts|memory|reports)(/[A-Za-z0-9._-]+)*$"
+        },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "producer": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceURL": { "anyOf": [{ "type": "string", "format": "uri" }, { "type": "null" }] },
+        "contentKey": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "evidenceLevel": {
+          "type": "string",
+          "enum": [
+            "search_metadata",
+            "primary_content",
+            "transcript",
+            "research_note",
+            "user_preference"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -148,11 +148,8 @@ struct MobileSetupView: View {
 
     @MainActor
     private func apply(_ submission: MobileSetupSubmission) async throws -> String {
-        if let provider = submission.settings[.translationProvider] {
-            applySetting(provider, for: .translationProvider)
-        }
-        for (key, value) in submission.settings where key != .translationProvider {
-            applySetting(value, for: key)
+        for (key, value) in submission.settings {
+            settings.configuration[key] = value
         }
         if !submission.settings.isEmpty {
             settings.save()
@@ -214,22 +211,6 @@ struct MobileSetupView: View {
         YTPlaybackBackend.resetLocalResolverCache()
     }
 
-    private func applySetting(_ value: String, for key: AppConfigurationKey) {
-        if key == .translationProvider {
-            let defaults = TranslationProviderPolicy.defaultsForProviderSwitch(
-                toProvider: value,
-                currentBaseURL: settings.configuration.translationBaseURL,
-                currentModelID: settings.configuration.translationModelID,
-                currentReasoningEffort: settings.configuration.translationReasoningEffort
-            )
-            settings.configuration.translationProvider = TranslationProviderPolicy.normalizedProvider(value)
-            settings.configuration.translationBaseURL = defaults.baseURL
-            settings.configuration.translationModelID = defaults.modelID
-            settings.configuration.translationReasoningEffort = defaults.reasoningEffort
-            return
-        }
-        settings.configuration[key] = value
-    }
 }
 
 private struct QRCodeView: View {

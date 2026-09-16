@@ -1,0 +1,70 @@
+{
+  "events": [
+    {
+      "id": "1",
+      "event": "turn.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 1,
+        "sequence": 1,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.started",
+        "occurredAt": "2026-09-03T01:00:02Z",
+        "payload": {
+          "mode": "research"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "event": "web.search_failed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 2,
+        "sequence": 2,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "web.search_failed",
+        "occurredAt": "2026-09-03T01:00:10Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD3",
+          "code": "WEB_SEARCH_FAILED"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "event": "source.saved",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 3,
+        "sequence": 3,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "source.saved",
+        "occurredAt": "2026-09-03T01:00:20Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD2",
+          "kind": "podcast_search"
+        }
+      }
+    },
+    {
+      "id": "4",
+      "event": "turn.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 4,
+        "sequence": 4,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.completed",
+        "occurredAt": "2026-09-03T01:08:00Z",
+        "payload": {
+          "status": "completed"
+        }
+      }
+    }
+  ]
+}

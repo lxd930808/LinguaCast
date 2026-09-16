@@ -168,20 +168,6 @@ final class CloudGenerationUITests: XCTestCase {
         app.terminate()
     }
 
-    func testSettingsLocalBackendKeepsLegacySections() {
-        let app = launch(scenario: "tabs", tab: "settings")
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
-        XCTAssertTrue(
-            app.descendants(matching: .any)["screen.settings"].waitForExistence(timeout: 10)
-        )
-        // Canary default (local): the legacy DashScope section stays visible.
-        #if !os(tvOS)
-        scrollUntilExists(app, identifier: "settings.dashscope-api-key")
-        XCTAssertTrue(app.secureTextFields["settings.dashscope-api-key"].exists)
-        #endif
-        app.terminate()
-    }
-
     // MARK: - Helpers
 
     /// The player screen identifier differs per platform: the iOS chrome

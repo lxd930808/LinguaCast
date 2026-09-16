@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/contracts/content-artifact-v1.schema.json",
+  "title": "Content Artifact Manifest v1",
+  "description": "Immutable artifact manifest published atomically once all required files are uploaded and verified. Frozen with WP0; any change requires bumping schemaVersion and updating both sides' contract tests.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "pipelineVersion",
+    "jobId",
+    "contentType",
+    "contentKey",
+    "sourceLanguage",
+    "targetLanguage",
+    "translationQuality",
+    "generatedAt",
+    "audioFingerprint",
+    "sourceFingerprint",
+    "audio",
+    "files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "pipelineVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jobId": {
+      "type": "string",
+      "pattern": "^cj_[A-Za-z0-9]{20,40}$"
+    },
+    "contentType": {
+      "type": "string",
+      "enum": ["podcast_episode", "video"]
+    },
+    "contentKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceLanguage": {
+      "type": "string",
+      "minLength": 2
+    },
+    "targetLanguage": {
+      "type": "string",
+      "minLength": 2
+    },
+    "translationQuality": {
+      "type": "string",
+      "enum": ["fast", "quality"]
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "audioFingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the prepared audio object actually used for ASR and playback."
+    },
+    "sourceFingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 over the canonical untranslated segments JSON; translation reuse boundary."
+    },
+    "audio": {
+      "type": "object",
+      "required": ["mimeType", "bytes", "durationSeconds", "sha256", "transcoded"],
+      "additionalProperties": false,
+      "properties": {
+        "mimeType": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "durationSeconds": { "type": "number", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "transcoded": { "type": "boolean" }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "required", "status", "mimeType", "bytes", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "role": {
+            "type": "string",
+            "enum": ["segments", "sourceVtt", "targetVtt", "rawTranscript", "audio", "backup"]
+          },
+          "required": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["ready", "failed"] },
+          "mimeType": { "type": "string" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "etag": { "type": "string" }
+        }
+      }
+    }
+  },
+  "comments": {
+    "readiness": "A manifest is only visible to clients after every required file has status=ready and has been verified against its sha256. Optional (required=false) files may carry status=failed without blocking readiness.",
+    "segmentsWireFormat": "The segments.json payload mirrors the Swift LearningSegment Codable layout: sequence, startMS, endMS, text, learningText, translation, speaker?, notes, words[] (text,startMS,endMS,punctuation?), playbackSentence? (id,text,translation,startMS,endMS), timingSource? (wordTimeline|semantic|legacy)."
+  }
+}

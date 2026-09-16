@@ -1,0 +1,14 @@
+{
+  "contentType": "video",
+  "contentKey": "video:youtube:dQw4w9WgXcQ",
+  "source": {
+    "platform": "youtube",
+    "sourceId": "dQw4w9WgXcQ",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "title": "Example Talk: Listening Practice"
+  },
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "fast",
+  "clientArtifactSchemaVersion": 1
+}

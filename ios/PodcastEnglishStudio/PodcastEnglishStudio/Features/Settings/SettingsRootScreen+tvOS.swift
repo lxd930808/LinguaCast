@@ -14,6 +14,8 @@ struct TVSettingsRootScreen: View {
     @State private var commitCoordinator: TVSettingsCommitCoordinator?
     @State private var cloudActiveJobCount = 0
     @State private var lastFocusIDs: [String: String] = [:]
+    @State private var showingAccountSignIn = false
+    @State private var confirmingAccountDeletion = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -26,6 +28,18 @@ struct TVSettingsRootScreen: View {
         .toolbar(.hidden, for: .automatic)
         .sheet(isPresented: $showingMobileSetup) {
             MobileSetupView()
+        }
+        .sheet(isPresented: $showingAccountSignIn) {
+            AccountSignInSheet()
+        }
+        .confirmationDialog(
+            L10n.string("account.delete_confirm_title", fallback: "Delete your account?"),
+            isPresented: $confirmingAccountDeletion,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.string("account.delete", fallback: "Delete Account"), role: .destructive) {
+                Task { await AccountController.shared.deleteAccount() }
+            }
         }
         .confirmationDialog(
             L10n.string("settings.clear_icloud_subtitle_cache", fallback: "Clear iCloud Subtitle Cache"),
@@ -67,35 +81,6 @@ struct TVSettingsRootScreen: View {
         switch route {
         case .category(let destination):
             categoryScreen(for: destination)
-        case .generationBackend:
-            optionScreen(
-                title: L10n.string("settings.generation_backend", fallback: "Generation Backend"),
-                options: [
-                    TVSettingsOption(
-                        value: GenerationBackend.cloud,
-                        title: L10n.string("settings.generation_backend_cloud", fallback: "Cloud Service"),
-                        help: L10n.string(
-                            "settings.generation_backend_cloud.help",
-                            fallback: "Run transcription and translation on your server."
-                        ),
-                        icon: "cloud.fill"
-                    ),
-                    TVSettingsOption(
-                        value: GenerationBackend.local,
-                        title: L10n.string("settings.generation_backend_local", fallback: "On-Device (Legacy)"),
-                        help: L10n.string(
-                            "settings.generation_backend_local.help",
-                            fallback: "Use DashScope and translation keys stored on this device."
-                        ),
-                        icon: "internaldrive"
-                    )
-                ],
-                current: settings.configuration.generationBackendMode,
-                onSelect: { value in
-                    settings.configuration.generationBackendMode = value
-                    commitCoordinator?.requestSave()
-                }
-            )
         case .translationQuality:
             optionScreen(
                 title: L10n.string("settings.translation_quality_mode", fallback: "Translation Quality"),
@@ -345,9 +330,6 @@ struct TVSettingsRootScreen: View {
         case .cloudService:
             settings.configuration.contentServiceEnabled = !currentlyOn
             commitCoordinator?.requestSave()
-        case .contentFilter:
-            settings.configuration.contentFilterEnabled = !currentlyOn
-            commitCoordinator?.requestSave()
         case .localMedia:
             localMedia.setEnabled(!currentlyOn)
         default:
@@ -357,6 +339,12 @@ struct TVSettingsRootScreen: View {
 
     private func applyAction(rowID: String, destination: SettingsDestination) {
         switch rowID {
+        case "account-sign-in":
+            showingAccountSignIn = true
+        case "account-sign-out":
+            Task { await AccountController.shared.signOut() }
+        case "account-delete":
+            confirmingAccountDeletion = true
         case "mobile-setup":
             showingMobileSetup = true
         case "sync-now":

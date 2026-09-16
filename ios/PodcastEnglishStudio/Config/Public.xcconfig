@@ -1,0 +1,18 @@
+// Public defaults for an open-source checkout. These are placeholders so the project
+// builds (with your own signing) without any local setup.
+//
+// To build the official LinguaCast release, copy Local.xcconfig.example to
+// Local.xcconfig (gitignored) and fill in the real Team ID and service URLs — the
+// #include? below pulls it in automatically when present and its values win.
+//
+// NB: a bare "//" in an xcconfig value starts a comment and truncates everything
+// after it, so URLs below split the double slash with $(EMPTY_MACRO) (an empty
+// build setting) to keep the lexer from seeing "//" — it expands back to "" at
+// build time, reconstructing the real URL.
+EMPTY_MACRO =
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+LINGUACAST_ACCOUNT_URL = https:/$(EMPTY_MACRO)/example.com
+LINGUACAST_CONTENT_SERVICE_URL = https:/$(EMPTY_MACRO)/example.com
+LINGUACAST_ASSISTANT_SERVICE_URL = https:/$(EMPTY_MACRO)/example.com
+
+#include? "Local.xcconfig"

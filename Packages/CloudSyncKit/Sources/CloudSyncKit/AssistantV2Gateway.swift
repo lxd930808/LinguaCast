@@ -281,12 +281,13 @@ public final class AssistantV2Gateway: AssistantV2Gatewaying, Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
         }
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw AssistantGatewayError.transport(error.localizedDescription)
+        var (data, response) = try await transmit(request)
+        if let first = response as? HTTPURLResponse, first.statusCode == 401,
+           let refreshable = tokenProvider as? RefreshableBearerTokenProviding,
+           AccountErrorCodes.isExpiredAccessToken(data),
+           let renewed = try? await refreshable.refreshBearerToken() {
+            request.setValue("Bearer \(renewed)", forHTTPHeaderField: "Authorization")
+            (data, response) = try await transmit(request)
         }
         guard let http = response as? HTTPURLResponse else {
             throw AssistantGatewayError.transport("missing HTTP response")
@@ -297,5 +298,13 @@ public final class AssistantV2Gateway: AssistantV2Gatewaying, Sendable {
         }
         let server = try? decoder.decode(AssistantErrorEnvelope.self, from: data).error
         throw AssistantGatewayError.http(status: http.statusCode, server: server)
+    }
+
+    private func transmit(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch {
+            throw AssistantGatewayError.transport(error.localizedDescription)
+        }
     }
 }

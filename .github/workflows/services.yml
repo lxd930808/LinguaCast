@@ -1,0 +1,51 @@
+name: services
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node-services:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - services/account-service
+          - services/content-pipeline
+          - services/research-assistant
+          - tools/local-youtube-media-service
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+      - name: Install ffmpeg for media probe tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  self-host-compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the self-host compose file in both identity modes
+        working-directory: deploy/self-host
+        run: |
+          for mode in selfhost apple; do
+            ./init-env.sh "$mode" "$RUNNER_TEMP/$mode.env"
+            docker compose -f docker-compose.yml --env-file "$RUNNER_TEMP/$mode.env" config --quiet
+          done
+      - name: Syntax-check deploy scripts
+        run: for f in deploy/self-host/*.sh; do bash -n "$f"; done

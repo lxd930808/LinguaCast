@@ -10,26 +10,11 @@ final class YTSubtitleDisplayState {
     var segments: [LearningSegment] = []
     var errorMessage: String?
     var cloudCheckRequired = false
-    var canGenerateFromAudio = false
-    /// Bumped by settings/other CTAs to trigger DualSubtitleOverlay audio ASR.
-    var generateFromAudioRequestID = 0
-    var audioDownloadProgress: Double?
-    var audioDownloadBytesPerSecond: Double?
     var playbackTime: TimeInterval = 0
 
     func segment(at time: TimeInterval) -> LearningSegment? {
         let timeMS = Int((time * 1000).rounded())
         return segments.first { timeMS >= $0.startMS && timeMS <= $0.endMS }
-    }
-
-    func requestGenerateFromAudio() {
-        canGenerateFromAudio = true
-        generateFromAudioRequestID += 1
-    }
-
-    func resetAudioDownloadMetrics() {
-        audioDownloadProgress = nil
-        audioDownloadBytesPerSecond = nil
     }
 }
 
@@ -45,9 +30,6 @@ struct DualSubtitleOverlay: View {
     @State private var loadingSubtitleKeys: Set<String> = []
     @State private var loadedSubtitleKey: String?
     @State private var retryGeneration = 0
-    @State private var bypassCloudCheck = false
-    @State private var generateFromAudio = false
-    @State private var isGeneratingFromAudio = false
 
     private var currentSegment: LearningSegment? {
         subtitleState.segment(at: currentTime)
@@ -56,17 +38,8 @@ struct DualSubtitleOverlay: View {
     private var generationProgressText: String? {
         YTSourceGenerationProgressText.title(
             step: video.sourceGenerationStep,
-            progress: video.sourceGenerationProgress,
-            downloadProgress: subtitleState.audioDownloadProgress,
-            bytesPerSecond: subtitleState.audioDownloadBytesPerSecond
+            progress: video.sourceGenerationProgress
         )
-    }
-
-    private var generationProgressValue: Double? {
-        if video.sourceGenerationStep == "downloading" {
-            return subtitleState.audioDownloadProgress
-        }
-        return video.sourceGenerationProgress
     }
 
     var body: some View {
@@ -74,18 +47,9 @@ struct DualSubtitleOverlay: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 16)
         // Keep interactive CTAs above sibling overlays for reliable hit testing.
-        .zIndex(subtitleState.canGenerateFromAudio || subtitleState.cloudCheckRequired ? 2 : 0)
-        .task(id: "\(subtitleKey):\(retryGeneration):\(generateFromAudio)") {
-            let configuration = settings.configuration
-            if generateFromAudio {
-                await runAudioASR(configuration: configuration)
-            } else {
-                await loadSubtitles(key: subtitleKey, configuration: configuration)
-            }
-        }
-        .onChange(of: subtitleState.generateFromAudioRequestID) { _, requestID in
-            guard requestID > 0 else { return }
-            startAudioASR()
+        .zIndex(subtitleState.cloudCheckRequired ? 2 : 0)
+        .task(id: "\(subtitleKey):\(retryGeneration)") {
+            await loadSubtitles(key: subtitleKey, configuration: settings.configuration)
         }
         .onAppear {
             recoverFromStaleSourceGenerationState()
@@ -102,19 +66,16 @@ struct DualSubtitleOverlay: View {
                 isPreparing: (subtitleState.errorMessage == nil
                     && currentSegment == nil
                     && subtitleState.segments.isEmpty)
-                    || isGeneratingFromAudio
                     || (video.sourceGenerationStep != nil
                         && video.subtitleStatus != "ready"
                         && video.subtitleStatus != "failed"),
                 preparingMessage: generationProgressText,
-                preparingProgress: isGeneratingFromAudio || video.sourceGenerationStep != nil
-                    ? generationProgressValue
+                preparingProgress: video.sourceGenerationStep != nil
+                    ? video.sourceGenerationProgress
                     : nil,
                 preferences: settings.committedSubtitlePresentation,
                 displayMode: settings.committedConfiguration.subtitleDisplayMode,
-                onRetryCloud: subtitleState.cloudCheckRequired ? retryCloudCheck : nil,
-                onGenerateAnyway: subtitleState.cloudCheckRequired ? generateAnyway : nil,
-                onGenerateFromAudio: subtitleState.canGenerateFromAudio ? startAudioASR : nil
+                onRetryCloud: subtitleState.cloudCheckRequired ? retryCloudCheck : nil
             )
         } else {
             Color.clear
@@ -150,7 +111,6 @@ struct DualSubtitleOverlay: View {
         if settings.configuration.translationTarget == configuration.translationTarget {
             subtitleState.errorMessage = nil
             subtitleState.cloudCheckRequired = false
-            subtitleState.canGenerateFromAudio = false
         }
         do {
             print("DualSubtitleOverlay: loading subtitles for \(video.id)")
@@ -158,16 +118,13 @@ struct DualSubtitleOverlay: View {
                 video: video,
                 configuration: configuration,
                 context: modelContext,
-                bypassCloudCheck: bypassCloudCheck,
                 captionIngestionPolicy: captionIngestionPolicy
             ) { partial in
                 guard settings.configuration.translationTarget == configuration.translationTarget else { return }
                 subtitleState.segments = partial
                 subtitleState.errorMessage = nil
                 subtitleState.cloudCheckRequired = false
-                subtitleState.canGenerateFromAudio = false
             }
-            bypassCloudCheck = false
             guard settings.configuration.translationTarget == configuration.translationTarget else { return }
             subtitleState.segments = segments
             loadedSubtitleKey = key
@@ -180,61 +137,11 @@ struct DualSubtitleOverlay: View {
                 subtitleState.errorMessage = CloudErrorMessagePresenter.display(error.localizedDescription)
                     ?? error.localizedDescription
                 subtitleState.cloudCheckRequired = error is CloudSubtitleLookupError
-                subtitleState.canGenerateFromAudio = YTLocalService.canGenerateFromAudio(after: error)
-            }
-        }
-    }
-
-    private func runAudioASR(configuration: AppConfiguration) async {
-        guard !isGeneratingFromAudio else { return }
-        isGeneratingFromAudio = true
-        defer {
-            isGeneratingFromAudio = false
-            generateFromAudio = false
-            subtitleState.resetAudioDownloadMetrics()
-        }
-        subtitleState.errorMessage = nil
-        subtitleState.canGenerateFromAudio = false
-        subtitleState.resetAudioDownloadMetrics()
-        do {
-            let segments = try await localService.generateSubtitlesFromAudio(
-                video: video,
-                configuration: configuration,
-                context: modelContext,
-                onDownloadProgress: { progress, bytesPerSecond in
-                    subtitleState.audioDownloadProgress = progress
-                    subtitleState.audioDownloadBytesPerSecond = bytesPerSecond
-                }
-            ) { partial in
-                guard settings.configuration.translationTarget == configuration.translationTarget else { return }
-                subtitleState.segments = partial
-            }
-            guard settings.configuration.translationTarget == configuration.translationTarget else { return }
-            subtitleState.segments = segments
-            loadedSubtitleKey = subtitleKey
-        } catch {
-            guard AsyncOperationErrorPresentationPolicy.shouldPresent(error) else { return }
-            if settings.configuration.translationTarget == configuration.translationTarget {
-                subtitleState.errorMessage = error.localizedDescription
-                subtitleState.canGenerateFromAudio = true
             }
         }
     }
 
     private func retryCloudCheck() {
-        bypassCloudCheck = false
-        generateFromAudio = false
-        retryGeneration += 1
-    }
-
-    private func generateAnyway() {
-        bypassCloudCheck = true
-        generateFromAudio = false
-        retryGeneration += 1
-    }
-
-    private func startAudioASR() {
-        generateFromAudio = true
         retryGeneration += 1
     }
 
@@ -247,7 +154,6 @@ struct DualSubtitleOverlay: View {
         }
         video.sourceGenerationStep = nil
         video.sourceGenerationProgress = nil
-        subtitleState.resetAudioDownloadMetrics()
         try? modelContext.save()
     }
 }
@@ -263,8 +169,6 @@ struct YTSubtitleDisplayView: View {
     /// Subtitle display mode from committed settings.
     var displayMode: String = AppConfiguration.defaultSubtitleDisplayMode
     var onRetryCloud: (() -> Void)?
-    var onGenerateAnyway: (() -> Void)?
-    var onGenerateFromAudio: (() -> Void)?
     /// Dynamic Type scale applied after base point-size calculation.
     @ScaledMetric(relativeTo: .body) private var dynamicTypeScale: CGFloat = 1
 
@@ -302,24 +206,10 @@ struct YTSubtitleDisplayView: View {
                             .font(.caption.weight(.medium))
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.white.opacity(0.9))
-                        if let onRetryCloud, let onGenerateAnyway {
-                            HStack(spacing: 10) {
-                                Button(L10n.string("episode_detail.retry", fallback: "Retry"), action: onRetryCloud)
-                                Button(L10n.string("episodes.generate_bilingual_subtitles", fallback: "Generate bilingual subtitles"), action: onGenerateAnyway)
-                            }
-                            .buttonStyle(.bordered)
-                            .font(.caption.weight(.semibold))
-                        }
-                        if let onGenerateFromAudio {
-                            Button(
-                                L10n.string(
-                                    "ytvideo_player.generate_from_audio",
-                                    fallback: "Generate bilingual content from audio"
-                                ),
-                                action: onGenerateFromAudio
-                            )
-                            .buttonStyle(.borderedProminent)
-                            .font(.caption.weight(.semibold))
+                        if let onRetryCloud {
+                            Button(L10n.string("episode_detail.retry", fallback: "Retry"), action: onRetryCloud)
+                                .buttonStyle(.bordered)
+                                .font(.caption.weight(.semibold))
                         }
                     } else if isPreparing {
                         if let preparingProgress {

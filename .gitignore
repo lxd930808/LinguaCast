@@ -11,6 +11,32 @@ tools/local-youtube-media-service/.data/
 tools/local-youtube-media-service/.env
 tools/local-youtube-media-service/.env.*
 !tools/local-youtube-media-service/.env.example
+
+# Backend services
+services/*/node_modules/
+services/*/dist/
+services/*/.env
+services/*/data/
+services/*/tmp/
+services/*/*.db
+services/*/*.db-wal
+services/*/*.db-shm
+services/*/evaluation/output/
+
+# Self-hosted deployment: local secrets and operator state
+deploy/self-host/.env
+deploy/self-host/secrets/*
+!deploy/self-host/secrets/README.md
+!deploy/self-host/secrets/.gitignore
+deploy/self-host/pi-config/auth.json
+deploy/self-host/backups/
+
+# iOS signing/service config with real values (see Config/*.example, ExportOptions*.plist.example)
+ios/PodcastEnglishStudio/Config/Local.xcconfig
+ios/PodcastEnglishStudio/ExportOptions-TestFlight.plist
+ios/PodcastEnglishStudio/ExportOptions-TestFlight-Upload.plist
+ios/PodcastEnglishStudio/ExportOptions-TestFlight-tvOS-Upload.plist
+
 *.log
 .cache/
 .swiftpm/

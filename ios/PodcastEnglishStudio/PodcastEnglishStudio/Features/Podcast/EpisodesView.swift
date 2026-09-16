@@ -126,7 +126,6 @@ private struct PodcastProgramsSection: View {
     @Binding var selectedTab: AppTab
     @Query(sort: \PodcastSubscription.updatedAt, order: .reverse) private var subscriptions: [PodcastSubscription]
     @Query(sort: \EpisodeRecord.updatedAt, order: .reverse) private var episodes: [EpisodeRecord]
-    @State private var contentFilter = ContentFilterService()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -187,29 +186,10 @@ private struct PodcastProgramsSection: View {
                 #endif
             }
         }
-        .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: subscriptions.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
-        }
     }
 
     private var visibleSubscriptions: [PodcastSubscription] {
-        subscriptions.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        contentFilter.prefetchAgentVerdicts(subscriptions.map {
-            ContentFilterService.Item(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        })
+        subscriptions
     }
 
     private func count(for subscription: PodcastSubscription) -> Int {
@@ -230,7 +210,6 @@ private struct YouTubeProgramsSection: View {
     @Environment(SettingsStore.self) private var settings
     @Query(sort: \YTChannelRecord.updatedAt, order: .reverse) private var channels: [YTChannelRecord]
     @Query(sort: \YTVideoRecord.recordUpdatedAt, order: .reverse) private var videos: [YTVideoRecord]
-    @State private var contentFilter = ContentFilterService()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -287,29 +266,10 @@ private struct YouTubeProgramsSection: View {
                 #endif
             }
         }
-        .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: channels.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
-        }
     }
 
     private var visibleChannels: [YTChannelRecord] {
-        channels.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        contentFilter.prefetchAgentVerdicts(channels.map {
-            ContentFilterService.Item(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        })
+        channels
     }
 
     private func channelArtworkURL(for channel: YTChannelRecord) -> String? {
@@ -415,7 +375,6 @@ struct PodcastProgramDetailView: View {
     @State private var selectedPlaybackCategory: PlaybackListCategory = .unplayed
     @State private var isRefreshing = false
     @State private var isLoadingAll = false
-    @State private var contentFilter = ContentFilterService()
 
     init(subscription: PodcastSubscription, selectedTab: Binding<AppTab>) {
         _selectedTab = selectedTab
@@ -544,22 +503,11 @@ struct PodcastProgramDetailView: View {
         .refreshable {
             await refresh()
         }
-        .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
-        }
         .task(id: programPrefetchToken) {
             await ArtworkPrefetchService.shared.prefetchUntilCancelled(
                 urls: programPrefetchURLs,
                 token: programPrefetchToken
             )
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: episodes.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
         }
         .fullScreenCover(isPresented: isEpisodeDetailPresented) {
             if let selectedEpisodeID {
@@ -659,16 +607,7 @@ struct PodcastProgramDetailView: View {
     }
 
     private var visibleEpisodes: [EpisodeRecord] {
-        episodes.filter {
-            $0.appearsInSubscriptionLibrary &&
-                !contentFilter.isFilteredOut(id: $0.id, title: $0.episodeTitle, channel: $0.showTitle)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        contentFilter.prefetchAgentVerdicts(episodes.map {
-            ContentFilterService.Item(id: $0.id, title: $0.episodeTitle, channel: $0.showTitle)
-        })
+        episodes.filter { $0.appearsInSubscriptionLibrary }
     }
 
     private var programPrefetchToken: String {

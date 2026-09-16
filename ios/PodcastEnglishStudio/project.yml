@@ -7,16 +7,23 @@
 #   - app target：application，iOS + tvOS 双平台，部署目标均 17.0
 #   - 条件项：INFOPLIST_FILE / ASSETCATALOG_COMPILER_APPICON_NAME /
 #     TARGETED_DEVICE_FAMILY 的 [sdk=appletv*] 变体（见下方带 sdk 后缀的键）
-#   - 签名：由使用者自己的 Apple Developer Team 管理；默认本地模式无需 CloudKit
+#   - 签名：DEVELOPMENT_TEAM 通过 Config/Public.xcconfig 注入（可选本地覆盖
+#     Config/Local.xcconfig，见该目录下的 .example 模板），Automatic，entitlements 指向 Support/
 #   - 版本：MARKETING_VERSION=0.2，CURRENT_PROJECT_VERSION=1，SWIFT_VERSION=5.0
 #   - Core：以本地 SwiftPM 包产品 PodcastEnglishStudioCore 链接（根 Package.swift），
 #     不再把 ../PodcastEnglishStudioCore/*.swift 直接编入 app target。
 
 name: PodcastEnglishStudio
 
+# DEVELOPMENT_TEAM and the LinguaCast service URLs come from Config/Public.xcconfig
+# (placeholders) with an optional Config/Local.xcconfig override — see that directory's
+# .example templates. Applies to all configs/targets below.
+configFiles:
+  Debug: Config/Public.xcconfig
+  Release: Config/Public.xcconfig
+
 options:
-  bundleIdPrefix: com.example
-  defaultConfig: Debug
+  bundleIdPrefix: com.local
   developmentRegion: en
   createIntermediateGroups: true
   generateEmptyDirectories: true
@@ -53,16 +60,10 @@ packages:
     path: ../../Packages/ChineseTTS
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher.git
-    exactVersion: 8.11.0
+    from: 8.11.0
   YouTubeKit:
     url: https://github.com/alexeichhorn/YouTubeKit.git
     revision: 7cc81901f9bbf2f9d2766bd8a54e128b974e4c94
-
-configs:
-  Debug: debug
-  Release: release
-  CloudDebug: debug
-  CloudRelease: release
 
 # 工程级公共设置（对应旧 pbxproj 的工程级 Debug/Release）。
 settings:
@@ -117,7 +118,7 @@ targets:
         product: YouTubeKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.LinguaCast
+        PRODUCT_BUNDLE_IDENTIFIER: com.local.PodcastEnglishStudio
         PRODUCT_NAME: "$(TARGET_NAME)"
         MARKETING_VERSION: "0.9"
         CURRENT_PROJECT_VERSION: "3"
@@ -129,7 +130,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: PodcastEnglishStudio/Support/Info.plist
         CODE_SIGN_STYLE: Automatic
-        ICLOUD_CONTAINER_IDENTIFIER: ""
+        CODE_SIGN_ENTITLEMENTS: PodcastEnglishStudio/Support/PodcastEnglishStudio.entitlements
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator appletvos appletvsimulator"
         SUPPORTS_MACCATALYST: NO
         ENABLE_PREVIEWS: YES
@@ -146,17 +147,9 @@ targets:
         "TARGETED_DEVICE_FAMILY[sdk=appletv*]": "3"
       configs:
         Debug:
-          APS_ENVIRONMENT: ""
-          ICLOUD_CONTAINER_ENVIRONMENT: ""
-        Release:
-          APS_ENVIRONMENT: ""
-          ICLOUD_CONTAINER_ENVIRONMENT: ""
-        CloudDebug:
-          CODE_SIGN_ENTITLEMENTS: PodcastEnglishStudio/Support/PodcastEnglishStudio.entitlements
           APS_ENVIRONMENT: development
           ICLOUD_CONTAINER_ENVIRONMENT: Development
-        CloudRelease:
-          CODE_SIGN_ENTITLEMENTS: PodcastEnglishStudio/Support/PodcastEnglishStudio.entitlements
+        Release:
           APS_ENVIRONMENT: production
           ICLOUD_CONTAINER_ENVIRONMENT: Production
 
@@ -173,8 +166,8 @@ targets:
     settings:
       base:
         # Nest under the app id so Automatic signing can register a unique
-        # `<id>.xctrunner` App ID for this team (choose an identifier unique to your account).
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.LinguaCast.uitests
+        # `<id>.xctrunner` App ID for this team (flat com.local.* runners are often taken).
+        PRODUCT_BUNDLE_IDENTIFIER: com.local.PodcastEnglishStudio.uitests
         PRODUCT_NAME: "$(TARGET_NAME)"
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
@@ -203,7 +196,7 @@ schemes:
       # the visible "official iframe" setting. Uncomment to re-enable.
       # environmentVariables:
       #   YT_PLAYBACK_BACKEND: local-service
-      #   YT_LOCAL_MEDIA_BASE_URL: http://192.168.x.x:3210
+      #   YT_LOCAL_MEDIA_BASE_URL: http://172.16.100.54:3210
       #   YT_LOCAL_MEDIA_TOKEN: dev-local-token
       #   YT_LOCAL_MEDIA_MODE: mp4
     test:
@@ -212,17 +205,3 @@ schemes:
         - PodcastEnglishStudioUITests
     archive:
       config: Release
-
-  PodcastEnglishStudio-CloudKit:
-    build:
-      targets:
-        PodcastEnglishStudio: all
-        PodcastEnglishStudioUITests: test
-    run:
-      config: CloudDebug
-    test:
-      config: CloudDebug
-      targets:
-        - PodcastEnglishStudioUITests
-    archive:
-      config: CloudRelease

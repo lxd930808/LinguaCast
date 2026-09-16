@@ -1,0 +1,882 @@
+openapi: 3.0.3
+info:
+  title: Linguacast Cloud Content Job API
+  version: 1.0.0
+  description: >-
+    V10/V12 cloud content generation contract. Clients submit podcast episodes
+    or videos for server-side media acquisition, ASR, segmentation, translation
+    and artifact packaging, then poll job status and download artifacts.
+    V12 adds a content-key-scoped video playback URL that reuses a durable MP4
+    asset independent of subtitle language, quality, job ID, or device.
+    This document, content-artifact-v1.schema.json and the golden fixtures
+    under services/content-pipeline/fixtures/contract are the single source
+    of truth for the wire format. Any contract change MUST update these
+    artifacts and both sides' contract tests first. Artifact schema v1 is
+    frozen: video media is never injected into the subtitle manifest.
+  contact:
+    name: PodcastEnglishStudio V10
+servers:
+  - url: https://lxd.linguacast.xyz
+    description: Production entry (Nginx routes /v1/content-* to 127.0.0.1:3220)
+tags:
+  - name: jobs
+  - name: artifacts
+  - name: media
+  - name: health
+paths:
+  /v1/content-jobs:
+    post:
+      tags: [jobs]
+      summary: Create or reuse a content job
+      description: >-
+        Idempotent create. The server derives a dedupe key from the
+        authenticated owner scope plus content key, source language, target
+        language, translation quality and pipeline version (see
+        content-keys-v1.md). A matching active or completed job returns 200
+        with reused=true; a new job returns 202 with reused=false. The
+        optional Idempotency-Key header is an opaque client token scoped to
+        the owner; when it matches an existing job whose derived fields
+        differ from this request, the server returns 409 IDEMPOTENCY_CONFLICT.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContentJobCreateRequest'
+      responses:
+        '200':
+          description: Existing job reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobResponse'
+        '202':
+          description: New job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Idempotency-Key reused with different fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: clientArtifactSchemaVersion newer than server support
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/content-jobs/{jobId}:
+    get:
+      tags: [jobs]
+      summary: Get job status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Current job state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [jobs]
+      summary: Cancel a job
+      description: >-
+        Cancels a non-terminal job. purgeArtifacts defaults to false and must
+        never delete shared source artifacts referenced by other variants.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - name: purgeArtifacts
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Job cancelled (or already terminal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/content-jobs:lookup:
+    get:
+      tags: [jobs]
+      summary: Find current job or artifacts for a generation variant
+      description: >-
+        Used when the client lost the job ID, for cross-device handoff, or
+        for pre-submit reconciliation. Returns the most recent job for the
+        exact variant, or job=null when none exists.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contentType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ContentType'
+        - name: contentKey
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: targetLanguage
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: translationQuality
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/TranslationQuality'
+      responses:
+        '200':
+          description: Lookup result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobLookupResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/content-jobs/{jobId}/retry:
+    post:
+      tags: [jobs]
+      summary: Retry a failed job reusing valid checkpoints
+      description: >-
+        Only failed jobs with error.retryable=true may be retried. Retry
+        reuses persisted stage checkpoints; it never re-submits an already
+        confirmed billed ASR task. Returns 409 INVALID_JOB_STATE otherwise.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '202':
+          description: Job re-queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Job is not in a retryable failed state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /v1/content-jobs/{jobId}/audio-playback-url:
+    post:
+      tags: [jobs]
+      summary: Issue or refresh a short-lived signed audio playback URL
+      description: >-
+        Returns a short-lived signed URL for the job's prepared audio object.
+        Signed URLs are never persisted by the server or logged. Clients must
+        refresh based on expiresAt and must not treat URL expiry as content
+        loss. Podcast audio is available once the preparing_audio stage has
+        published the audio object (audioReady=true), before subtitles finish.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Signed playback URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioPlaybackUrlResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Audio not ready yet, or job has no playable audio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /v1/content-media/video-playback-url:
+    post:
+      tags: [media]
+      summary: Issue or refresh a short-lived signed video playback URL
+      description: >-
+        Returns a short-lived signed URL for the current ready MP4 asset of a
+        video contentKey (video:youtube:<videoID>). The asset is shared across
+        subtitle variants, translation quality, job IDs and devices. Signed
+        URLs exist only in the response: they are never persisted or logged.
+        Repeating this call only refreshes the signature; it never creates a
+        media object or a media-api prepare job.
+
+        preferredHeight is an optional client preference. The server selects
+        the current ready default rendition and does not generate a new
+        rendition to match the preference. If the ready asset cannot satisfy
+        a later client-side manual quality check, the client falls back to
+        the existing YouTube resolver and records manual_quality_miss.
+
+        A 404 from an older server that does not implement this endpoint MUST
+        be treated by clients as "V12 unsupported" and MUST fall back silently
+        to the existing playback chain. Clients MUST NOT surface that 404 as
+        a user-facing error.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoPlaybackUrlRequest'
+      responses:
+        '200':
+          description: Signed playback URL for the current ready video asset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoPlaybackUrlResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            No ready video asset for this contentKey (MEDIA_NOT_FOUND), or
+            an older server that does not implement the endpoint. Clients
+            treat both as a silent fallback.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: >-
+            MEDIA_NOT_READY while a promotion or active content job is in
+            flight (retryAfterSeconds set), or MEDIA_INTEGRITY_FAILED when
+            the registered object is missing or inconsistent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /v1/content-artifacts/{jobId}/{fileName}:
+    get:
+      tags: [artifacts]
+      summary: Download a published artifact file
+      description: >-
+        Authorized artifact download for files listed in the job's ready
+        manifest. Supports ETag / If-None-Match (304) so unchanged artifacts
+        are not re-downloaded.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - name: fileName
+          in: path
+          required: true
+          description: File name from the manifest (e.g. segments.json, source.vtt, target.vtt)
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Artifact bytes
+          headers:
+            ETag:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+          content:
+            application/json: {}
+            text/vtt: {}
+        '304':
+          description: Not modified
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/content-health/live:
+    get:
+      tags: [health]
+      summary: Liveness probe (no external dependencies)
+      security: []
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthLiveResponse'
+  /v1/content-health/ready:
+    get:
+      tags: [health]
+      summary: Readiness probe (database, object store config, temp dir, worker lease)
+      description: Never calls third-party billed APIs.
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadyResponse'
+        '503':
+          description: A dependency check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadyResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Rotatable client Bearer token. Compared in constant time. Job IDs never imply authorization.
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^cj_[A-Za-z0-9]{20,40}$'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+  schemas:
+    ContentType:
+      type: string
+      enum: [podcast_episode, video]
+    JobStatus:
+      type: string
+      enum: [queued, running, ready, failed, cancelled, expired]
+      description: >-
+        Closed set for v1. Clients MUST tolerate unknown values by mapping
+        them to a non-terminal "unknown" state and continuing to poll; they
+        must never crash or overwrite local state on unknown enums.
+    JobStage:
+      type: string
+      enum:
+        - validating_source
+        - fetching_audio
+        - preparing_audio
+        - transcribing
+        - segmenting
+        - translating
+        - refining_subtitles
+        - packaging
+        - completed
+      description: >-
+        Present only while status=running. Clients display unknown stages
+        with a generic in-progress message.
+    TranslationQuality:
+      type: string
+      enum: [fast, quality]
+    ContentSource:
+      type: object
+      required: [platform, sourceId, url]
+      additionalProperties: false
+      properties:
+        platform:
+          type: string
+          enum: [rss, youtube]
+        sourceId:
+          type: string
+          description: Episode GUID for podcasts; platform video ID for videos.
+        url:
+          type: string
+          format: uri
+          description: RSS enclosure URL or canonical video URL.
+        feedUrl:
+          type: string
+          format: uri
+          description: Podcast feed URL used to derive the content key. Absent for videos.
+        title:
+          type: string
+          description: Display-only metadata; never part of identity or fingerprints.
+    ContentJobCreateRequest:
+      type: object
+      required:
+        - contentType
+        - contentKey
+        - source
+        - sourceLanguage
+        - targetLanguage
+        - translationQuality
+        - clientArtifactSchemaVersion
+      additionalProperties: false
+      properties:
+        contentType:
+          $ref: '#/components/schemas/ContentType'
+        contentKey:
+          type: string
+          description: Derived per content-keys-v1.md. Server re-derives and rejects mismatches.
+        source:
+          $ref: '#/components/schemas/ContentSource'
+        sourceLanguage:
+          type: string
+          example: en
+        targetLanguage:
+          type: string
+          example: zh-Hans
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        clientArtifactSchemaVersion:
+          type: integer
+          minimum: 1
+          description: Highest artifact schema version the client can consume.
+    ContentJobError:
+      type: object
+      required: [code, message, retryable, traceId]
+      additionalProperties: true
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          description: English technical summary. Never the only user-facing hint; clients localize by code.
+        retryable:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        failedStage:
+          $ref: '#/components/schemas/JobStage'
+        traceId:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+          description: Stable machine-readable localization parameters (e.g. limit sizes).
+    ErrorCode:
+      type: string
+      description: See content-job-error-codes.md. Clients MUST tolerate unknown codes as non-retryable INTERNAL_ERROR-class failures.
+    ArtifactFileRef:
+      type: object
+      required: [name, role, required, status, mimeType, bytes, sha256]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          example: segments.json
+        role:
+          type: string
+          enum: [segments, sourceVtt, targetVtt, rawTranscript, audio, backup]
+        required:
+          type: boolean
+          description: Required artifacts must be ready before the job can become ready.
+        status:
+          type: string
+          enum: [ready, failed]
+        mimeType:
+          type: string
+        bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        etag:
+          type: string
+    AudioMetadata:
+      type: object
+      required: [mimeType, bytes, durationSeconds, sha256, transcoded]
+      additionalProperties: false
+      properties:
+        mimeType:
+          type: string
+          example: audio/mpeg
+        bytes:
+          type: integer
+          minimum: 0
+        durationSeconds:
+          type: number
+          minimum: 0
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        transcoded:
+          type: boolean
+          description: true when the source was re-encoded to normalized MP3.
+    ArtifactManifestRef:
+      type: object
+      required:
+        - schemaVersion
+        - pipelineVersion
+        - generatedAt
+        - audioFingerprint
+        - files
+      additionalProperties: false
+      properties:
+        schemaVersion:
+          type: integer
+          minimum: 1
+          description: >-
+            Artifact schema version. Clients with a lower
+            clientArtifactSchemaVersion MUST NOT parse the artifacts and
+            should surface an upgrade prompt.
+        pipelineVersion:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        audioFingerprint:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        sourceFingerprint:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Fingerprint of the untranslated segments; translation reuse boundary.
+        audio:
+          $ref: '#/components/schemas/AudioMetadata'
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactFileRef'
+    ContentJobResponse:
+      type: object
+      required:
+        - jobId
+        - contentType
+        - contentKey
+        - sourceLanguage
+        - targetLanguage
+        - translationQuality
+        - pipelineVersion
+        - status
+        - progress
+        - audioReady
+        - subtitlesReady
+        - createdAt
+        - updatedAt
+        - retryAfterSeconds
+        - error
+        - artifacts
+      additionalProperties: true
+      properties:
+        jobId:
+          type: string
+        reused:
+          type: boolean
+          description: Present only in POST /v1/content-jobs responses.
+        contentType:
+          $ref: '#/components/schemas/ContentType'
+        contentKey:
+          type: string
+        source:
+          $ref: '#/components/schemas/ContentSource'
+        sourceLanguage:
+          type: string
+        targetLanguage:
+          type: string
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        pipelineVersion:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        stage:
+          $ref: '#/components/schemas/JobStage'
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Monotone non-decreasing per job.
+        stageProgress:
+          type: number
+          minimum: 0
+          maximum: 1
+        audioReady:
+          type: boolean
+          description: Podcast audio object published; playback URL may be requested.
+        subtitlesReady:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+          description: Server-suggested polling interval hint.
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/ContentJobError'
+            - type: 'null'
+        artifacts:
+          anyOf:
+            - $ref: '#/components/schemas/ArtifactManifestRef'
+            - type: 'null'
+    ContentJobLookupResponse:
+      type: object
+      required: [job]
+      additionalProperties: false
+      properties:
+        job:
+          anyOf:
+            - $ref: '#/components/schemas/ContentJobResponse'
+            - type: 'null'
+    AudioPlaybackUrlResponse:
+      type: object
+      required: [url, expiresAt, mimeType, bytes, durationSeconds, sha256, acceptRanges]
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Short-lived signed URL. Never persisted by either side.
+        expiresAt:
+          type: string
+          format: date-time
+        mimeType:
+          type: string
+          example: audio/mpeg
+        bytes:
+          type: integer
+          minimum: 0
+        durationSeconds:
+          type: number
+          minimum: 0
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        acceptRanges:
+          type: string
+          enum: [bytes]
+    VideoPlaybackUrlRequest:
+      type: object
+      required: [contentType, contentKey]
+      additionalProperties: false
+      properties:
+        contentType:
+          type: string
+          enum: [video]
+          description: First-version media lookup is video-only.
+        contentKey:
+          type: string
+          description: Stable video identity, e.g. video:youtube:<videoID>.
+        preferredHeight:
+          type: integer
+          minimum: 144
+          maximum: 4320
+          description: >-
+            Optional client preference only. The server never generates a new
+            rendition to match this value; it returns the current ready default
+            asset (or a miss / not-ready / integrity error).
+    VideoPlaybackUrlResponse:
+      type: object
+      required:
+        - schemaVersion
+        - mediaId
+        - contentType
+        - contentKey
+        - url
+        - expiresAt
+        - mimeType
+        - bytes
+        - sha256
+        - durationSeconds
+        - height
+        - videoCodec
+        - audioCodec
+        - acceptRanges
+        - mediaVersion
+        - createdAt
+      additionalProperties: true
+      properties:
+        schemaVersion:
+          type: integer
+          minimum: 1
+          description: First version is 1. Clients reject a newer required schema.
+        mediaId:
+          type: string
+          pattern: '^cm_[A-Za-z0-9]{20,40}$'
+          description: Opaque media asset ID for diagnostics only. Not an object key.
+        contentType:
+          type: string
+          enum: [video]
+        contentKey:
+          type: string
+        url:
+          type: string
+          format: uri
+          description: Short-lived signed URL. Never persisted by either side.
+        expiresAt:
+          type: string
+          format: date-time
+        mimeType:
+          type: string
+          example: video/mp4
+        bytes:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        durationSeconds:
+          type: number
+          minimum: 0
+          description: Used to cross-check subtitle audio timeline drift.
+        height:
+          type: integer
+          minimum: 1
+          description: Actual encoded height of the ready rendition.
+        videoCodec:
+          type: string
+          example: avc1
+        audioCodec:
+          type: string
+          example: aac
+        acceptRanges:
+          type: string
+          enum: [bytes]
+        mediaVersion:
+          type: string
+          description: Rendition / asset version identity, not a job ID.
+        createdAt:
+          type: string
+          format: date-time
+    HealthLiveResponse:
+      type: object
+      required: [status, service, version]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [live]
+        service:
+          type: string
+          enum: [linguacast-content]
+        version:
+          type: string
+    HealthReadyResponse:
+      type: object
+      required: [status, service, version, checks]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        service:
+          type: string
+          enum: [linguacast-content]
+        version:
+          type: string
+        checks:
+          type: object
+          required: [database, objectStoreConfig, tempDirWritable, workerLease]
+          additionalProperties: false
+          properties:
+            database:
+              $ref: '#/components/schemas/HealthCheckResult'
+            objectStoreConfig:
+              $ref: '#/components/schemas/HealthCheckResult'
+            tempDirWritable:
+              $ref: '#/components/schemas/HealthCheckResult'
+            workerLease:
+              $ref: '#/components/schemas/HealthCheckResult'
+    HealthCheckResult:
+      type: object
+      required: [ok]
+      additionalProperties: false
+      properties:
+        ok:
+          type: boolean
+        detail:
+          type: string
+          description: Free-form detail; must never contain secrets or signed URLs.
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ContentJobError'
+  responses:
+    BadRequest:
+      description: Invalid request fields
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: Valid token, but the job belongs to another owner scope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Unknown job or artifact
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: Rate limited; honor retryAfterSeconds
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unavailable:
+      description: Queue busy or storage full
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'

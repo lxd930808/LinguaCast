@@ -1,0 +1,1227 @@
+openapi: 3.0.3
+info:
+  title: Linguacast Research Assistant API
+  version: 1.0.0
+  description: >-
+    V13 independent research-assistant contract with additive V14 search
+    fields. Clients create research sessions, stream durable turn events,
+    confirm one source, then ask grounded questions against a single V10
+    transcript. V14 adds optional SearchPlan/SearchRun fields, podcast
+    platform projection, and search-run endpoints. This document,
+    assistant-v1.wire.schema.json, assistant-error-codes.md and
+    assistant-sse-v1.md are the single source of truth. Destructive field
+    changes MUST return to WP0 and bump schemaVersion.
+  contact:
+    name: PodcastEnglishStudio V13
+servers:
+  - url: https://assistant.linguacast.xyz
+    description: Production entry (proxy routes /v1/assistant* to 127.0.0.1:3230)
+tags:
+  - name: sessions
+  - name: turns
+  - name: sources
+  - name: health
+security:
+  - bearerAuth: []
+paths:
+  /v1/assistant-health/live:
+    get:
+      tags: [health]
+      summary: Process liveness
+      security: []
+      responses:
+        '200':
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthLiveResponse'
+  /v1/assistant-health/ready:
+    get:
+      tags: [health]
+      summary: Readiness (config, SQLite, Pi config, yt-dlp). Never calls paid APIs.
+      security: []
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadyResponse'
+        '503':
+          description: Degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthReadyResponse'
+  /v1/assistant/sessions:
+    post:
+      tags: [sessions]
+      summary: Create a research session
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    get:
+      tags: [sessions]
+      summary: List non-deleted sessions newest first
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Page of session summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/assistant/sessions/{sessionId}:
+    get:
+      tags: [sessions]
+      summary: Full session snapshot for disconnect recovery
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSnapshot'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [sessions]
+      summary: Idempotent delete of assistant-local data only
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '202':
+          description: Delete accepted (first request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionSummary'
+        '204':
+          description: Already deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/assistant/sessions/{sessionId}/turns:
+    post:
+      tags: [turns]
+      summary: Submit a research or QA turn
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnCreateRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/assistant/turns/{turnId}/events:
+    get:
+      tags: [turns]
+      summary: SSE event stream for a turn
+      parameters:
+        - $ref: '#/components/parameters/TurnId'
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/assistant/turns/{turnId}/cancel:
+    post:
+      tags: [turns]
+      summary: Cancel a queued or running turn
+      parameters:
+        - $ref: '#/components/parameters/TurnId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Cancelled or already terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/assistant/sessions/{sessionId}/search-results:
+    get:
+      tags: [sessions]
+      summary: Persisted search results for the session
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Normalized results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/assistant/sessions/{sessionId}/search-runs:
+    get:
+      tags: [sessions]
+      summary: Search runs for the session (newest first)
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Search run summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchRunListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/assistant/search-runs/{searchRunId}:
+    get:
+      tags: [sessions]
+      summary: One search run with ranked results
+      parameters:
+        - name: searchRunId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/SearchRunId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Search run detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchRun'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown searchRunId or not owned by this service
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /v1/assistant/sessions/{sessionId}/sources:
+    post:
+      tags: [sources]
+      summary: Confirm one persisted search result and start V10 prepare
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceBindRequest'
+      responses:
+        '200':
+          description: Existing binding reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentBinding'
+        '202':
+          description: Binding created and prepare started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentBinding'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    get:
+      tags: [sources]
+      summary: Current binding and V10/index snapshot
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/ClientVersion'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Current binding or null
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/SessionId'
+    TurnId:
+      name: turnId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/TurnId'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    ClientVersion:
+      name: X-Client-Version
+      in: header
+      required: false
+      schema:
+        type: string
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Unknown resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: Illegal state, idempotency conflict, or expired SSE cursor
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RateLimited:
+      description: Rate limited
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unavailable:
+      description: Saturated or dependency not ready
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    SessionId:
+      type: string
+      pattern: '^as_[0-9A-HJKMNP-TV-Z]{26}$'
+    TurnId:
+      type: string
+      pattern: '^at_[0-9A-HJKMNP-TV-Z]{26}$'
+    MessageId:
+      type: string
+      pattern: '^am_[0-9A-HJKMNP-TV-Z]{26}$'
+    SearchResultId:
+      type: string
+      pattern: '^sr_[0-9A-HJKMNP-TV-Z]{26}$'
+    SearchRunId:
+      type: string
+      pattern: '^srun_[0-9A-HJKMNP-TV-Z]{26}$'
+    BindingId:
+      type: string
+      pattern: '^cb_[0-9A-HJKMNP-TV-Z]{26}$'
+    CitationId:
+      type: string
+      pattern: '^ct_[0-9A-HJKMNP-TV-Z]{26}$'
+    TranslationQuality:
+      type: string
+      enum: [fast, quality]
+    SessionPhase:
+      type: string
+      description: Known phases; clients must tolerate unknown values.
+      enum:
+        - researching
+        - report_ready
+        - source_selected
+        - preparing_content
+        - transcript_ready
+        - qa_ready
+        - recoverable_error
+        - deleting
+        - deleted
+    TurnKind:
+      type: string
+      enum: [research, qa]
+    TurnStatus:
+      type: string
+      enum: [queued, running, completed, failed, cancelled]
+    Platform:
+      type: string
+      description: >-
+        Media platform. Canonical V14 value is youtube|podcast. Legacy
+        apple_podcasts remains valid and is the projection for clients that
+        do not send X-Client-Version advertising V14.
+      enum: [youtube, apple_podcasts, podcast]
+    MatchReason:
+      type: string
+      enum:
+        - title_exact
+        - entity_exact
+        - title_term_coverage
+        - person_tag
+        - person_tag_and_episode_title
+        - description_term
+        - recent_window
+        - channel_or_show_match
+        - duration_match
+        - language_match
+        - provider_rank
+        - metadata_complete
+        - filter_best_effort
+        - unqualified
+    ProviderStatusCode:
+      type: string
+      enum: [success, empty, partial, unavailable, rate_limited, misconfigured]
+    SearchIntent:
+      type: string
+      enum: [topic, person, show, channel, recent]
+    SourceType:
+      type: string
+      enum: [video, podcast_show, podcast_episode]
+    SessionCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        outputLanguage:
+          type: string
+          minLength: 2
+        storefront:
+          type: string
+          minLength: 2
+          maxLength: 2
+        targetLanguage:
+          type: string
+          minLength: 2
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        title:
+          type: string
+          maxLength: 80
+    ClientContext:
+      type: object
+      additionalProperties: false
+      properties:
+        outputLanguage:
+          type: string
+        storefront:
+          type: string
+        locale:
+          type: string
+    TurnCreateRequest:
+      type: object
+      required: [kind, text]
+      additionalProperties: false
+      properties:
+        kind:
+          $ref: '#/components/schemas/TurnKind'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        clientContext:
+          $ref: '#/components/schemas/ClientContext'
+    SourceBindRequest:
+      type: object
+      required: [searchResultId, targetLanguage, translationQuality]
+      additionalProperties: false
+      properties:
+        searchResultId:
+          $ref: '#/components/schemas/SearchResultId'
+        targetLanguage:
+          type: string
+          minLength: 2
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+    ErrorBody:
+      type: object
+      required: [code, message, retryable, traceId]
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        traceId:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+        provider:
+          type: string
+        partialResultCount:
+          type: integer
+          minimum: 0
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+    SessionSummary:
+      type: object
+      required: [sessionId, title, phase, createdAt, updatedAt]
+      additionalProperties: true
+      properties:
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        title:
+          type: string
+        phase:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        activeTurnId:
+          anyOf:
+            - $ref: '#/components/schemas/TurnId'
+            - type: 'null'
+    SessionListResponse:
+      type: object
+      required: [sessions, nextCursor]
+      additionalProperties: false
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionSummary'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+    TurnSummary:
+      type: object
+      required: [turnId, sessionId, kind, status, createdAt]
+      additionalProperties: true
+      properties:
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        kind:
+          $ref: '#/components/schemas/TurnKind'
+        status:
+          type: string
+        eventsURL:
+          type: string
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/ErrorBody'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        finishedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    TurnAcceptedResponse:
+      type: object
+      required: [turnId, sessionId, kind, status, eventsURL]
+      additionalProperties: true
+      properties:
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        kind:
+          $ref: '#/components/schemas/TurnKind'
+        status:
+          type: string
+        eventsURL:
+          type: string
+        reused:
+          type: boolean
+    AssistantMessage:
+      type: object
+      required: [messageId, sessionId, turnId, role, markdown, createdAt]
+      additionalProperties: true
+      properties:
+        messageId:
+          $ref: '#/components/schemas/MessageId'
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        role:
+          type: string
+          enum: [user, assistant, system_summary]
+        markdown:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        createdAt:
+          type: string
+          format: date-time
+    SearchResult:
+      type: object
+      required:
+        - searchResultId
+        - platform
+        - sourceType
+        - sourceId
+        - canonicalURL
+        - title
+        - deepResearchAvailability
+      additionalProperties: true
+      properties:
+        searchResultId:
+          $ref: '#/components/schemas/SearchResultId'
+        platform:
+          $ref: '#/components/schemas/Platform'
+        sourceType:
+          $ref: '#/components/schemas/SourceType'
+        sourceId:
+          type: string
+        canonicalURL:
+          type: string
+          format: uri
+        feedURL:
+          anyOf:
+            - type: string
+              format: uri
+            - type: 'null'
+        title:
+          type: string
+        publisher:
+          type: string
+        publishedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        durationSeconds:
+          anyOf:
+            - type: integer
+              minimum: 0
+            - type: 'null'
+        description:
+          type: string
+        thumbnailURL:
+          type: string
+        availability:
+          type: string
+        provider:
+          type: string
+        fallback:
+          type: boolean
+        provenance:
+          type: object
+          additionalProperties: true
+        deepResearchAvailability:
+          type: string
+          enum: [available, unavailable]
+        warnings:
+          type: array
+          items:
+            type: string
+        searchRunId:
+          $ref: '#/components/schemas/SearchRunId'
+        rank:
+          type: integer
+          minimum: 1
+        relevanceScore:
+          type: number
+        matchReason:
+          $ref: '#/components/schemas/MatchReason'
+        retrievedAt:
+          type: string
+          format: date-time
+        channelId:
+          type: string
+        viewCount:
+          type: integer
+          minimum: 0
+        likeCount:
+          type: integer
+          minimum: 0
+        podcastIndexFeedId:
+          type: integer
+        podcastIndexEpisodeId:
+          type: integer
+        itunesId:
+          type: string
+        guid:
+          type: string
+        language:
+          type: string
+        explicit:
+          type: boolean
+        enclosureUrl:
+          type: string
+        enclosureType:
+          type: string
+        fieldProvenance:
+          type: object
+          additionalProperties: true
+        qualified:
+          type: boolean
+    SearchPlan:
+      type: object
+      required: [intent, media, queries]
+      additionalProperties: true
+      properties:
+        intent:
+          $ref: '#/components/schemas/SearchIntent'
+        media:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            type: string
+            enum: [youtube, podcast]
+        queries:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+        person:
+          anyOf:
+            - type: string
+            - type: 'null'
+        showOrChannel:
+          anyOf:
+            - type: string
+            - type: 'null'
+        language:
+          type: string
+        region:
+          type: string
+        publishedAfter:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        publishedBefore:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        duration:
+          type: string
+          enum: [short, medium, long, any]
+        clean:
+          type: boolean
+    ProviderStatus:
+      type: object
+      required: [provider, status]
+      additionalProperties: true
+      properties:
+        provider:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProviderStatusCode'
+        latencyMs:
+          type: integer
+          minimum: 0
+        cacheHit:
+          type: boolean
+        errorCode:
+          type: string
+        retryAfterSeconds:
+          type: integer
+          minimum: 0
+        rawCount:
+          type: integer
+          minimum: 0
+        acceptedCount:
+          type: integer
+          minimum: 0
+    SearchRun:
+      type: object
+      required: [searchRunId, sessionId, turnId, provider, query, status, createdAt]
+      additionalProperties: true
+      properties:
+        searchRunId:
+          $ref: '#/components/schemas/SearchRunId'
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        parentRunId:
+          anyOf:
+            - $ref: '#/components/schemas/SearchRunId'
+            - type: 'null'
+        provider:
+          type: string
+        intent:
+          $ref: '#/components/schemas/SearchIntent'
+        query:
+          type: string
+        queryPlan:
+          $ref: '#/components/schemas/SearchPlan'
+        language:
+          type: string
+        locale:
+          type: string
+        status:
+          type: string
+        rawCount:
+          type: integer
+        acceptedCount:
+          type: integer
+        cacheHit:
+          type: boolean
+        latencyMs:
+          type: integer
+        errorCode:
+          type: string
+        retryAfterSeconds:
+          type: integer
+        retrievedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        providerStatus:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderStatus'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+        warnings:
+          type: array
+          items:
+            type: string
+    SearchRunListResponse:
+      type: object
+      required: [runs, nextCursor]
+      additionalProperties: false
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchRun'
+        nextCursor:
+          anyOf:
+            - type: string
+            - type: 'null'
+    SearchResultListResponse:
+      type: object
+      required: [results]
+      additionalProperties: false
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+    Report:
+      type: object
+      required: [title, summary, stage, sources]
+      additionalProperties: true
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        stage:
+          type: string
+          enum: [metadata, transcript]
+        markdown:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportSource'
+        createdAt:
+          type: string
+          format: date-time
+    ReportSource:
+      type: object
+      required: [searchResultId, ordinal]
+      additionalProperties: true
+      properties:
+        searchResultId:
+          $ref: '#/components/schemas/SearchResultId'
+        ordinal:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+    SourceGroup:
+      type: object
+      required: [reportId, turnId, title, createdAt, sources]
+      additionalProperties: false
+      properties:
+        reportId:
+          type: string
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportSource'
+    PlayerTarget:
+      type: object
+      required: [contentKey, startMs, endMs]
+      additionalProperties: false
+      properties:
+        contentKey:
+          type: string
+        startMs:
+          type: integer
+          minimum: 0
+        endMs:
+          type: integer
+          minimum: 0
+    Citation:
+      type: object
+      required:
+        - citationId
+        - contentKey
+        - startMs
+        - endMs
+        - quote
+        - playerTarget
+        - deepLink
+      additionalProperties: true
+      properties:
+        citationId:
+          $ref: '#/components/schemas/CitationId'
+        contentKey:
+          type: string
+        startMs:
+          type: integer
+          minimum: 0
+        endMs:
+          type: integer
+          minimum: 0
+        quote:
+          type: string
+          maxLength: 240
+        playerTarget:
+          $ref: '#/components/schemas/PlayerTarget'
+        deepLink:
+          type: string
+          pattern: '^linguacast://play\?content_key=.+&start_ms=[0-9]+$'
+    ContentBinding:
+      type: object
+      required:
+        - bindingId
+        - sessionId
+        - searchResultId
+        - contentKey
+        - contentType
+        - targetLanguage
+        - translationQuality
+        - status
+        - indexStatus
+      additionalProperties: true
+      properties:
+        bindingId:
+          $ref: '#/components/schemas/BindingId'
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        searchResultId:
+          $ref: '#/components/schemas/SearchResultId'
+        contentKey:
+          type: string
+        contentType:
+          type: string
+          enum: [podcast_episode, video]
+        targetLanguage:
+          type: string
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        v10JobId:
+          anyOf:
+            - type: string
+            - type: 'null'
+        status:
+          type: string
+        stage:
+          type: string
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        indexStatus:
+          type: string
+        error:
+          anyOf:
+            - $ref: '#/components/schemas/ErrorBody'
+            - type: 'null'
+        reused:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+    SourceListResponse:
+      type: object
+      required: [binding]
+      additionalProperties: false
+      properties:
+        binding:
+          anyOf:
+            - $ref: '#/components/schemas/ContentBinding'
+            - type: 'null'
+    SessionSnapshot:
+      type: object
+      required:
+        - sessionId
+        - title
+        - phase
+        - createdAt
+        - updatedAt
+        - messages
+        - searchResults
+      additionalProperties: true
+      properties:
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        title:
+          type: string
+        phase:
+          type: string
+        outputLanguage:
+          type: string
+        storefront:
+          type: string
+        targetLanguage:
+          type: string
+        translationQuality:
+          $ref: '#/components/schemas/TranslationQuality'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantMessage'
+        report:
+          anyOf:
+            - $ref: '#/components/schemas/Report'
+            - type: 'null'
+        sourceGroups:
+          type: array
+          description: Historical recommended sources grouped by research round, newest first. Duplicate searchResultId values appear only in the newest group that cited them.
+          items:
+            $ref: '#/components/schemas/SourceGroup'
+        searchResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+        searchRuns:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchRun'
+        binding:
+          anyOf:
+            - $ref: '#/components/schemas/ContentBinding'
+            - type: 'null'
+        activeTurn:
+          anyOf:
+            - $ref: '#/components/schemas/TurnSummary'
+            - type: 'null'
+    SseEventData:
+      type: object
+      required: [schemaVersion, sessionId, turnId, sequence, occurredAt, payload]
+      additionalProperties: false
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        sessionId:
+          $ref: '#/components/schemas/SessionId'
+        turnId:
+          $ref: '#/components/schemas/TurnId'
+        sequence:
+          type: integer
+          minimum: 1
+        occurredAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+    HealthLiveResponse:
+      type: object
+      required: [status, service, version]
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+          enum: [live]
+        service:
+          type: string
+        version:
+          type: string
+    HealthReadyResponse:
+      type: object
+      required: [status, service, version, checks]
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        checks:
+          type: object
+          additionalProperties: true

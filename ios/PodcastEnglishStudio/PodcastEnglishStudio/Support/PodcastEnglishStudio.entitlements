@@ -4,11 +4,15 @@
 <dict>
 	<key>aps-environment</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
 	<key>com.apple.developer.icloud-container-environment</key>
 	<string>$(ICLOUD_CONTAINER_ENVIRONMENT)</string>
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
-		<string>$(ICLOUD_CONTAINER_IDENTIFIER)</string>
+		<string>iCloud.com.local.PodcastEnglishStudio</string>
 	</array>
 	<key>com.apple.developer.icloud-services</key>
 	<array>

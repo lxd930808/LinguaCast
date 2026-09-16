@@ -375,13 +375,13 @@ final class LocalizationSmokeUITests: XCTestCase {
         #endif
     }
 
-    func testPodcastCloudCheckFailureOffersRetryAndExplicitPaidBypass() {
+    func testPodcastCloudCheckFailureOffersRetryWithoutLocalBypass() {
         let app = launch(language: languages[0], scenario: "podcast-cloud-check-required")
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         waitForScenario(app, scenario: "podcast-cloud-check-required")
 
         XCTAssertTrue(app.descendants(matching: .any)["subtitle.cloud-retry"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["subtitle.cloud-bypass"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["subtitle.cloud-bypass"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["podcast.open-settings"].exists)
         app.terminate()
     }

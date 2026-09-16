@@ -1,0 +1,10 @@
+{
+  "models": [
+    {
+      "alias": "primary",
+      "provider": "openrouter",
+      "model": "openai/gpt-4o-mini"
+    }
+  ],
+  "fallback": ["primary"]
+}

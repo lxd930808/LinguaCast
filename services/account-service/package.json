@@ -1,0 +1,27 @@
+{
+  "name": "linguacast-account-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "V18 account service: Sign in with Apple, App sessions, per-account config and quota ledger",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "ulid": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "license": "MIT"
+}

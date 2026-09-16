@@ -25,6 +25,7 @@ struct RootView: View {
     @State private var selectedTab: AppTab
     @State private var youtubeService = YTLocalService()
     @State private var isBootstrappingCatalogs = false
+    @State private var showingAccountSignIn = false
 
     init() {
         _selectedTab = State(initialValue: UITestSupport.isEnabled ? UITestSupport.initialTab : .home)
@@ -43,6 +44,9 @@ struct RootView: View {
         }
         .preferredColorScheme(UITestSupport.colorSchemeOverride)
         .tint(LinguaTheme.accent)
+        .sheet(isPresented: $showingAccountSignIn) {
+            AccountSignInSheet()
+        }
         .task {
             if UITestSupport.isEnabled {
                 UITestSupport.installFixtures(in: modelContext)
@@ -56,17 +60,16 @@ struct RootView: View {
                         configuration: settings.configuration
                     )
                 }
-                runner.resumePendingDisplayRefinements(
-                    context: modelContext,
-                    configuration: settings.configuration
-                )
             } else {
+                // Account restore runs beside the launch reconcile so offline launches stay fast.
+                Task {
+                    await AccountController.shared.start()
+                    if AccountController.shared.consumeFirstLaunchPrompt() {
+                        showingAccountSignIn = true
+                    }
+                }
                 runner.reconcileCompletions(context: modelContext)
                 runner.resumeOrphanedPipelines(
-                    context: modelContext,
-                    configuration: settings.configuration
-                )
-                runner.resumePendingDisplayRefinements(
                     context: modelContext,
                     configuration: settings.configuration
                 )
@@ -92,12 +95,9 @@ struct RootView: View {
                 return
             }
             guard phase == .active else { return }
+            Task { await AccountController.shared.refreshIfNeeded() }
             runner.reconcileCompletions(context: modelContext)
             runner.resumeOrphanedPipelines(
-                context: modelContext,
-                configuration: settings.configuration
-            )
-            runner.resumePendingDisplayRefinements(
                 context: modelContext,
                 configuration: settings.configuration
             )
@@ -124,12 +124,10 @@ struct RootView: View {
         }
     }
 
-    /// Stops cloud polling before suspension: in cloud mode every `running`
-    /// episode task is a remote-job observation loop (the local pipeline only
-    /// runs in local mode), so cancelling it is safe; the next foreground
+    /// Stops cloud polling before suspension: every `running` episode task is a
+    /// remote-job observation loop, so cancelling it is safe; the next foreground
     /// reconcile resumes from the persisted remote record.
     private func stopHighFrequencyCloudPolling() {
-        guard settings.configuration.generationBackendMode == .cloud else { return }
         let running = (try? modelContext.fetch(FetchDescriptor<EpisodeRecord>(
             predicate: #Predicate { $0.status == "running" }
         ))) ?? []
@@ -239,6 +237,7 @@ struct RootView: View {
         .environment(CloudSyncCoordinator.shared)
         .environment(PlaybackCatalogRecoveryCoordinator(cloudSync: .shared) { nil })
         .environment(SettingsNavigation())
+        .environment(AccountController.shared)
 }
 
 struct ConfigurationReadiness {
@@ -247,8 +246,7 @@ struct ConfigurationReadiness {
     init(configuration: AppConfiguration) {
         summary = ConfigurationReadinessPolicy.summary(
             youtubeAPIKey: configuration.youtubeAPIKey,
-            dashscopeAPIKey: configuration.dashscopeAPIKey,
-            translationAPIKey: configuration.translationAPIKey
+            cloudServiceReady: configuration.isCloudGenerationUsable
         )
     }
 
@@ -262,11 +260,17 @@ struct ConfigurationReadiness {
         if summary.isComplete {
             return L10n.string("root.subscriptions_can_be_added_content_refreshed_and_bilingual_subti", fallback: "Subscriptions can be added, content refreshed, and bilingual subtitles generated.")
         }
-        if !summary.hasPodcastGenerationKeys && !summary.hasYouTubeMetadataKey {
-            return L10n.string("root.fill_in_the_youtube_dashscope_and_translation_api_key_first_to_a", fallback: "Fill in the YouTube, DashScope and translation API Key first to avoid failure after adding or refreshing.")
+        if !summary.hasCloudService && !summary.hasYouTubeMetadataKey {
+            return L10n.string(
+                "root.setup_needs_youtube_key_and_cloud_service",
+                fallback: "Add a YouTube Data API key and sign in or connect a server before adding or refreshing content."
+            )
         }
-        if !summary.hasPodcastGenerationKeys {
-            return L10n.string("root.podcast_bilingual_subtitle_generation_requires_dashscope_and_tra", fallback: "Podcast Bilingual subtitle generation requires DashScope and translation API Key.")
+        if !summary.hasCloudService {
+            return L10n.string(
+                "root.setup_needs_cloud_service",
+                fallback: "Bilingual subtitle generation requires signing in or connecting a server."
+            )
         }
         return L10n.string("root.youtube_channel_list_requires_youtube_data_api_key", fallback: "YouTube Channel list requires YouTube Data API Key.")
     }
@@ -303,8 +307,7 @@ struct SetupChecklistView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 configurationRow(title: L10n.string("settings.youtube_data_api_key", fallback: "YouTube Data API Key"), requirement: .youtubeAPIKey)
-                configurationRow(title: L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), requirement: .dashscopeAPIKey)
-                configurationRow(title: L10n.string("root.translation_api_key", fallback: "Translation API Key"), requirement: .translationAPIKey)
+                configurationRow(title: L10n.string("settings.cloud_service", fallback: "Cloud Generation Service"), requirement: .cloudService)
             }
             .font(.caption)
 

@@ -1,0 +1,53 @@
+# LinguaCast self-host HTTPS entry point. Domains and the TLS policy come from .env.
+# CADDY_TLS is an ACME contact e-mail for public certificates, or "internal" on an
+# isolated test server (Caddy's local CA; clients must trust it explicitly).
+# No access log is configured: signed media paths must not end up in log files.
+
+(linguacast_common) {
+	tls {$CADDY_TLS}
+	# Service-to-service routes are never reachable from outside.
+	@internal path /internal/*
+	respond @internal 404
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+}
+
+{$ACCOUNT_DOMAIN} {
+	import linguacast_common
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy account-service:3240
+}
+
+{$CONTENT_DOMAIN} {
+	import linguacast_common
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy content-pipeline:3220
+}
+
+{$ASSISTANT_DOMAIN} {
+	import linguacast_common
+	request_body {
+		max_size 4MB
+	}
+	reverse_proxy research-assistant:3230 {
+		# Server-sent events must reach the client without buffering.
+		flush_interval -1
+	}
+}
+
+{$MEDIA_DOMAIN} {
+	import linguacast_common
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy media-service:3210 {
+		flush_interval -1
+	}
+}

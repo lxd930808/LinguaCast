@@ -16,7 +16,6 @@ struct YTChannelDetailView: View {
     @State private var retryingVideoIDs: Set<String> = []
     @State private var selectedVideoID: String?
     @State private var selectedPlaybackCategory: PlaybackListCategory = .unplayed
-    @State private var contentFilter = ContentFilterService()
 #if os(tvOS)
     /// Debounced stream resolve for the focused poster so playback can hit cache.
     @FocusState private var focusedVideoID: String?
@@ -48,22 +47,11 @@ struct YTChannelDetailView: View {
         .refreshable {
             await refresh()
         }
-        .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
-        }
         .task(id: channelPrefetchToken) {
             await ArtworkPrefetchService.shared.prefetchUntilCancelled(
                 urls: channelPrefetchURLs,
                 token: channelPrefetchToken
             )
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: videos.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
         }
 #if os(tvOS)
         .onChange(of: focusedVideoID) { _, videoID in
@@ -339,16 +327,7 @@ struct YTChannelDetailView: View {
     }
 
     private var visibleVideos: [YTVideoRecord] {
-        videos.filter {
-            $0.appearsInSubscriptionLibrary &&
-                !contentFilter.isFilteredOut(id: $0.id, title: $0.title, channel: channel.displayName)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        contentFilter.prefetchAgentVerdicts(videos.map {
-            ContentFilterService.Item(id: $0.id, title: $0.title, channel: channel.displayName)
-        })
+        videos.filter { $0.appearsInSubscriptionLibrary }
     }
 
     private var channelPrefetchToken: String {

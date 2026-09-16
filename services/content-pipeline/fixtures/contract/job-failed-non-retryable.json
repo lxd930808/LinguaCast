@@ -1,0 +1,35 @@
+{
+  "jobId": "cj_01JFX9L8M2N4P6Q8R0T2V4X6ZB",
+  "contentType": "video",
+  "contentKey": "video:youtube:dQw4w9WgXcQ",
+  "source": {
+    "platform": "youtube",
+    "sourceId": "dQw4w9WgXcQ",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "title": "Example Talk: Listening Practice"
+  },
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "translationQuality": "fast",
+  "pipelineVersion": "v10.1",
+  "status": "failed",
+  "stage": "validating_source",
+  "progress": 0.01,
+  "audioReady": false,
+  "subtitlesReady": false,
+  "createdAt": "2026-08-28T03:00:00Z",
+  "updatedAt": "2026-08-28T03:00:12Z",
+  "retryAfterSeconds": 60,
+  "error": {
+    "code": "SOURCE_RESTRICTED",
+    "message": "Video requires sign-in to confirm age; cannot download audio",
+    "retryable": false,
+    "failedStage": "validating_source",
+    "traceId": "tr_01JFX9MR2C4E6G8J0M2P",
+    "params": {
+      "platform": "youtube",
+      "restriction": "age"
+    }
+  },
+  "artifacts": null
+}

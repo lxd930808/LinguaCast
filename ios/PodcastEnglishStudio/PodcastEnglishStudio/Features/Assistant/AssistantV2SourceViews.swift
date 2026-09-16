@@ -36,10 +36,13 @@ struct AssistantV2SourceCard: View {
                     .foregroundStyle(LinguaTheme.danger)
             }
             if let job {
-                Text(AssistantV2ViewModel.transcriptStatusTitle(job.status, progress: job.progress, error: job.error?.message))
+                Text(AssistantV2ViewModel.transcriptStatusTitle(job.status, progress: job.progress, error: job.error?.message, installStatus: job.installStatus))
                     .font(.caption)
                     .foregroundStyle(job.status == .ready ? LinguaTheme.success :
                         ((job.status == .failedRetryable || job.status == .failedTerminal) ? LinguaTheme.danger : LinguaTheme.warning))
+                if let transcriptionError {
+                    Text(transcriptionError).font(.caption).foregroundStyle(LinguaTheme.warning)
+                }
                 if job.status == .requested || job.status == .waitingService || job.status == .running || job.status == .installing {
                     LinguaProgressBar(value: job.progress)
                 }
@@ -79,7 +82,7 @@ struct AssistantV2SourceCard: View {
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("assistant.v2.play.\(source.transcribeSourceId ?? source.id)")
             } else if source.canTranscribe, source.status != .corrupt,
-                      job == nil || job?.status == .failedRetryable {
+                      job == nil || job?.status == .failedRetryable || job?.installStatus == "stalled" {
                 Button(L10n.string("assistant.v2.transcribe", fallback: "Transcribe")) {
                     onTranscribe()
                 }

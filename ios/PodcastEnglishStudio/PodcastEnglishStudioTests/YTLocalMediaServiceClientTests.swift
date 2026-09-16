@@ -73,7 +73,7 @@ final class YTLocalMediaServiceClientTests: XCTestCase {
             YTLocalMediaServiceConfig.applyMobileSetupPatch(
                 from: [
                     "localMediaEnabled": "1",
-                    "localMediaBaseURL": "http://192.0.2.10:3210",
+                    "localMediaBaseURL": "http://179.253.242.16:3210",
                     "localMediaToken": "new-token",
                     "localMediaMode": "mp4",
                     "localMediaPreferredHeight": "720"
@@ -84,7 +84,7 @@ final class YTLocalMediaServiceClientTests: XCTestCase {
 
         let stored = YTLocalMediaServiceConfig.loadUserDefaults(defaults: defaults)
         XCTAssertTrue(stored.enabled)
-        XCTAssertEqual(stored.baseURLString, "http://192.0.2.10:3210")
+        XCTAssertEqual(stored.baseURLString, "http://179.253.242.16:3210")
         XCTAssertEqual(stored.token, "new-token")
         XCTAssertEqual(stored.mode, .mp4)
         XCTAssertEqual(stored.preferredHeight, 720)
@@ -96,7 +96,7 @@ final class YTLocalMediaServiceClientTests: XCTestCase {
             )
         )
         let partial = YTLocalMediaServiceConfig.loadUserDefaults(defaults: defaults)
-        XCTAssertEqual(partial.baseURLString, "http://192.0.2.10:3210")
+        XCTAssertEqual(partial.baseURLString, "http://179.253.242.16:3210")
         XCTAssertEqual(partial.preferredHeight, 1080)
     }
 

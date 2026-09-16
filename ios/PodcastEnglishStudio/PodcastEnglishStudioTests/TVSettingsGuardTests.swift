@@ -42,7 +42,6 @@ final class TVSettingsGuardTests: XCTestCase {
         let required = [
             "screen.settings",
             "settings.cloud-enabled",
-            "settings.generation-backend",
             "settings.cloud-status",
             "settings.cloud-token",
             "settings.cloud-active-jobs",

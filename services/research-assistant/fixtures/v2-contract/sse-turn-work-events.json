@@ -1,0 +1,241 @@
+{
+  "events": [
+    {
+      "id": "1",
+      "event": "turn.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 1,
+        "sequence": 1,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.started",
+        "occurredAt": "2026-09-03T01:00:02Z",
+        "payload": {
+          "mode": "research"
+        }
+      }
+    },
+    {
+      "id": "2",
+      "event": "thinking.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 2,
+        "sequence": 2,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "thinking.started",
+        "occurredAt": "2026-09-03T01:00:04Z",
+        "payload": {
+          "blockId": "th_0"
+        }
+      }
+    },
+    {
+      "id": "3",
+      "event": "thinking.delta",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 3,
+        "sequence": 3,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "thinking.delta",
+        "occurredAt": "2026-09-03T01:00:05Z",
+        "payload": {
+          "blockId": "th_0",
+          "text": "The user wants research on AI in accounting. I should start with a YouTube search."
+        }
+      }
+    },
+    {
+      "id": "4",
+      "event": "thinking.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 4,
+        "sequence": 4,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "thinking.completed",
+        "occurredAt": "2026-09-03T01:00:16Z",
+        "payload": {
+          "blockId": "th_0",
+          "durationMs": 12000
+        }
+      }
+    },
+    {
+      "id": "5",
+      "event": "tool.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 5,
+        "sequence": 5,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "tool.started",
+        "occurredAt": "2026-09-03T01:00:17Z",
+        "payload": {
+          "callId": "call_1",
+          "tool": "search_youtube",
+          "query": "AI accounting for firms"
+        }
+      }
+    },
+    {
+      "id": "6",
+      "event": "source.saved",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 6,
+        "sequence": 6,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "source.saved",
+        "occurredAt": "2026-09-03T01:00:25Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD1",
+          "kind": "youtube_search"
+        }
+      }
+    },
+    {
+      "id": "7",
+      "event": "tool.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 7,
+        "sequence": 7,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "tool.completed",
+        "occurredAt": "2026-09-03T01:00:26Z",
+        "payload": {
+          "callId": "call_1",
+          "tool": "search_youtube",
+          "ok": true
+        }
+      }
+    },
+    {
+      "id": "8",
+      "event": "thinking.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 8,
+        "sequence": 8,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "thinking.started",
+        "occurredAt": "2026-09-03T01:00:27Z",
+        "payload": {
+          "blockId": "th_1"
+        }
+      }
+    },
+    {
+      "id": "9",
+      "event": "thinking.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 9,
+        "sequence": 9,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "thinking.completed",
+        "occurredAt": "2026-09-03T01:00:30Z",
+        "payload": {
+          "blockId": "th_1",
+          "durationMs": 3000,
+          "redacted": true
+        }
+      }
+    },
+    {
+      "id": "10",
+      "event": "tool.started",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 10,
+        "sequence": 10,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "tool.started",
+        "occurredAt": "2026-09-03T01:00:31Z",
+        "payload": {
+          "callId": "call_2",
+          "tool": "retrieve_evidence"
+        }
+      }
+    },
+    {
+      "id": "11",
+      "event": "tool.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 11,
+        "sequence": 11,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "tool.completed",
+        "occurredAt": "2026-09-03T01:00:33Z",
+        "payload": {
+          "callId": "call_2",
+          "tool": "retrieve_evidence",
+          "ok": false
+        }
+      }
+    },
+    {
+      "id": "12",
+      "event": "report.delta",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 12,
+        "sequence": 12,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "report.delta",
+        "occurredAt": "2026-09-03T01:07:00Z",
+        "payload": {
+          "text": "## Theme\n"
+        }
+      }
+    },
+    {
+      "id": "13",
+      "event": "report.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 13,
+        "sequence": 13,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "report.completed",
+        "occurredAt": "2026-09-03T01:08:00Z",
+        "payload": {
+          "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD5",
+          "citationCount": 4
+        }
+      }
+    },
+    {
+      "id": "14",
+      "event": "turn.completed",
+      "data": {
+        "schemaVersion": 2,
+        "eventId": 14,
+        "sequence": 14,
+        "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "turnId": "vt_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+        "type": "turn.completed",
+        "occurredAt": "2026-09-03T01:08:01Z",
+        "payload": {
+          "status": "completed"
+        }
+      }
+    }
+  ]
+}

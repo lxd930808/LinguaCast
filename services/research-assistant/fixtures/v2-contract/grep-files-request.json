@@ -1,0 +1,7 @@
+{
+  "root": "research://sources",
+  "pattern": "accounting",
+  "mode": "literal",
+  "glob": "*.md",
+  "caseSensitive": false
+}

@@ -91,9 +91,6 @@ final class LocalizationCatalogTests: XCTestCase {
                 if file.lastPathComponent == "LocalSetupServer.swift", sourceLine.contains("(\"Apple TV") {
                     continue
                 }
-                if file.lastPathComponent == "YTCaptionService.swift", sourceLine.contains(".contains(\"中文\")") {
-                    continue
-                }
                 violations.append("\(file.lastPathComponent):\(line): \(source[matchRange])")
             }
             for match in directUIString.matches(in: source, range: range) {

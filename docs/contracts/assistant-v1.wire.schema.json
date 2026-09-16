@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/contracts/assistant-v1.wire.schema.json",
+  "title": "Assistant API v1 wire schemas",
+  "description": "Machine-checkable JSON Schema mirror of assistant-v1.openapi.yaml. Golden fixtures under services/research-assistant/fixtures/contract and ios/.../Fixtures/Assistant are validated against these definitions.",
+  "definitions": {
+    "SessionId": { "type": "string", "pattern": "^as_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "TurnId": { "type": "string", "pattern": "^at_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "MessageId": { "type": "string", "pattern": "^am_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "SearchResultId": { "type": "string", "pattern": "^sr_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "SearchRunId": { "type": "string", "pattern": "^srun_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "BindingId": { "type": "string", "pattern": "^cb_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "CitationId": { "type": "string", "pattern": "^ct_[0-9A-HJKMNP-TV-Z]{26}$" },
+    "TranslationQuality": { "type": "string", "enum": ["fast", "quality"] },
+    "TurnKind": { "type": "string", "enum": ["research", "qa"] },
+    "ErrorBody": {
+      "type": "object",
+      "required": ["code", "message", "retryable", "traceId"],
+      "additionalProperties": true,
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retryAfterSeconds": { "type": "integer", "minimum": 0 },
+        "traceId": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" },
+        "provider": { "type": "string" },
+        "partialResultCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": { "$ref": "#/definitions/ErrorBody" }
+      }
+    },
+    "SessionCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputLanguage": { "type": "string", "minLength": 2 },
+        "storefront": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "targetLanguage": { "type": "string", "minLength": 2 },
+        "translationQuality": { "$ref": "#/definitions/TranslationQuality" },
+        "title": { "type": "string", "maxLength": 80 }
+      }
+    },
+    "ClientContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputLanguage": { "type": "string" },
+        "storefront": { "type": "string" },
+        "locale": { "type": "string" }
+      }
+    },
+    "TurnCreateRequest": {
+      "type": "object",
+      "required": ["kind", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "$ref": "#/definitions/TurnKind" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "clientContext": { "$ref": "#/definitions/ClientContext" }
+      }
+    },
+    "SourceBindRequest": {
+      "type": "object",
+      "required": ["searchResultId", "targetLanguage", "translationQuality"],
+      "additionalProperties": false,
+      "properties": {
+        "searchResultId": { "$ref": "#/definitions/SearchResultId" },
+        "targetLanguage": { "type": "string", "minLength": 2 },
+        "translationQuality": { "$ref": "#/definitions/TranslationQuality" }
+      }
+    },
+    "SessionSummary": {
+      "type": "object",
+      "required": ["sessionId", "title", "phase", "createdAt", "updatedAt"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "title": { "type": "string" },
+        "phase": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "activeTurnId": { "anyOf": [{ "$ref": "#/definitions/TurnId" }, { "type": "null" }] }
+      }
+    },
+    "SessionListResponse": {
+      "type": "object",
+      "required": ["sessions", "nextCursor"],
+      "additionalProperties": false,
+      "properties": {
+        "sessions": { "type": "array", "items": { "$ref": "#/definitions/SessionSummary" } },
+        "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+      }
+    },
+    "TurnSummary": {
+      "type": "object",
+      "required": ["turnId", "sessionId", "kind", "status", "createdAt"],
+      "additionalProperties": true,
+      "properties": {
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "kind": { "$ref": "#/definitions/TurnKind" },
+        "status": { "type": "string" },
+        "eventsURL": { "type": "string" },
+        "error": { "anyOf": [{ "$ref": "#/definitions/ErrorBody" }, { "type": "null" }] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "startedAt": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "finishedAt": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] }
+      }
+    },
+    "TurnAcceptedResponse": {
+      "type": "object",
+      "required": ["turnId", "sessionId", "kind", "status", "eventsURL"],
+      "additionalProperties": true,
+      "properties": {
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "kind": { "$ref": "#/definitions/TurnKind" },
+        "status": { "type": "string" },
+        "eventsURL": { "type": "string" },
+        "reused": { "type": "boolean" }
+      }
+    },
+    "PlayerTarget": {
+      "type": "object",
+      "required": ["contentKey", "startMs", "endMs"],
+      "additionalProperties": false,
+      "properties": {
+        "contentKey": { "type": "string", "minLength": 1 },
+        "startMs": { "type": "integer", "minimum": 0 },
+        "endMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Citation": {
+      "type": "object",
+      "required": ["citationId", "contentKey", "startMs", "endMs", "quote", "playerTarget", "deepLink"],
+      "additionalProperties": true,
+      "properties": {
+        "citationId": { "$ref": "#/definitions/CitationId" },
+        "contentKey": { "type": "string" },
+        "startMs": { "type": "integer", "minimum": 0 },
+        "endMs": { "type": "integer", "minimum": 0 },
+        "quote": { "type": "string", "maxLength": 240 },
+        "playerTarget": { "$ref": "#/definitions/PlayerTarget" },
+        "deepLink": { "type": "string", "pattern": "^linguacast://play\\?content_key=.+&start_ms=[0-9]+$" }
+      }
+    },
+    "AssistantMessage": {
+      "type": "object",
+      "required": ["messageId", "sessionId", "turnId", "role", "markdown", "createdAt"],
+      "additionalProperties": true,
+      "properties": {
+        "messageId": { "$ref": "#/definitions/MessageId" },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "role": { "type": "string", "enum": ["user", "assistant", "system_summary"] },
+        "markdown": { "type": "string" },
+        "citations": { "type": "array", "items": { "$ref": "#/definitions/Citation" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SearchResult": {
+      "type": "object",
+      "required": ["searchResultId", "platform", "sourceType", "sourceId", "canonicalURL", "title", "deepResearchAvailability"],
+      "additionalProperties": true,
+      "properties": {
+        "searchResultId": { "$ref": "#/definitions/SearchResultId" },
+        "platform": { "type": "string", "enum": ["youtube", "apple_podcasts", "podcast"] },
+        "sourceType": { "type": "string", "enum": ["video", "podcast_show", "podcast_episode"] },
+        "sourceId": { "type": "string", "minLength": 1 },
+        "canonicalURL": { "type": "string", "format": "uri" },
+        "feedURL": { "anyOf": [{ "type": "string", "format": "uri" }, { "type": "null" }] },
+        "title": { "type": "string" },
+        "publisher": { "type": "string" },
+        "publishedAt": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "durationSeconds": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "description": { "type": "string" },
+        "thumbnailURL": { "type": "string" },
+        "availability": { "type": "string" },
+        "provider": { "type": "string" },
+        "fallback": { "type": "boolean" },
+        "provenance": { "type": "object" },
+        "deepResearchAvailability": { "type": "string", "enum": ["available", "unavailable"] },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "searchRunId": { "$ref": "#/definitions/SearchRunId" },
+        "rank": { "type": "integer", "minimum": 1 },
+        "relevanceScore": { "type": "number" },
+        "matchReason": {
+          "type": "string",
+          "enum": [
+            "title_exact",
+            "entity_exact",
+            "title_term_coverage",
+            "person_tag",
+            "person_tag_and_episode_title",
+            "description_term",
+            "recent_window",
+            "channel_or_show_match",
+            "duration_match",
+            "language_match",
+            "provider_rank",
+            "metadata_complete",
+            "filter_best_effort",
+            "unqualified"
+          ]
+        },
+        "retrievedAt": { "type": "string", "format": "date-time" },
+        "channelId": { "type": "string" },
+        "viewCount": { "type": "integer", "minimum": 0 },
+        "likeCount": { "type": "integer", "minimum": 0 },
+        "podcastIndexFeedId": { "type": "integer" },
+        "podcastIndexEpisodeId": { "type": "integer" },
+        "itunesId": { "type": "string" },
+        "guid": { "type": "string" },
+        "language": { "type": "string" },
+        "explicit": { "type": "boolean" },
+        "enclosureUrl": { "type": "string" },
+        "enclosureType": { "type": "string" },
+        "fieldProvenance": { "type": "object" },
+        "qualified": { "type": "boolean" }
+      }
+    },
+    "SearchPlan": {
+      "type": "object",
+      "required": ["intent", "media", "queries"],
+      "additionalProperties": true,
+      "properties": {
+        "intent": { "type": "string", "enum": ["topic", "person", "show", "channel", "recent"] },
+        "media": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["youtube", "podcast"] }
+        },
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "person": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "showOrChannel": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "language": { "type": "string" },
+        "region": { "type": "string" },
+        "publishedAfter": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "publishedBefore": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "duration": { "type": "string", "enum": ["short", "medium", "long", "any"] },
+        "clean": { "type": "boolean" }
+      }
+    },
+    "ProviderStatus": {
+      "type": "object",
+      "required": ["provider", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "provider": { "type": "string" },
+        "status": { "type": "string", "enum": ["success", "empty", "partial", "unavailable", "rate_limited", "misconfigured"] },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "cacheHit": { "type": "boolean" },
+        "errorCode": { "type": "string" },
+        "retryAfterSeconds": { "type": "integer", "minimum": 0 },
+        "rawCount": { "type": "integer", "minimum": 0 },
+        "acceptedCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SearchRun": {
+      "type": "object",
+      "required": ["searchRunId", "sessionId", "turnId", "provider", "query", "status", "createdAt"],
+      "additionalProperties": true,
+      "properties": {
+        "searchRunId": { "$ref": "#/definitions/SearchRunId" },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "parentRunId": { "anyOf": [{ "$ref": "#/definitions/SearchRunId" }, { "type": "null" }] },
+        "provider": { "type": "string" },
+        "intent": { "type": "string" },
+        "query": { "type": "string" },
+        "queryPlan": { "$ref": "#/definitions/SearchPlan" },
+        "language": { "type": "string" },
+        "locale": { "type": "string" },
+        "status": { "type": "string" },
+        "rawCount": { "type": "integer" },
+        "acceptedCount": { "type": "integer" },
+        "cacheHit": { "type": "boolean" },
+        "latencyMs": { "type": "integer" },
+        "errorCode": { "type": "string" },
+        "retryAfterSeconds": { "type": "integer" },
+        "retrievedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "providerStatus": { "type": "array", "items": { "$ref": "#/definitions/ProviderStatus" } },
+        "results": { "type": "array", "items": { "$ref": "#/definitions/SearchResult" } },
+        "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "SearchRunListResponse": {
+      "type": "object",
+      "required": ["runs", "nextCursor"],
+      "additionalProperties": false,
+      "properties": {
+        "runs": { "type": "array", "items": { "$ref": "#/definitions/SearchRun" } },
+        "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+      }
+    },
+    "SearchResultListResponse": {
+      "type": "object",
+      "required": ["results"],
+      "additionalProperties": false,
+      "properties": {
+        "results": { "type": "array", "items": { "$ref": "#/definitions/SearchResult" } }
+      }
+    },
+    "ReportSource": {
+      "type": "object",
+      "required": ["searchResultId", "ordinal"],
+      "additionalProperties": true,
+      "properties": {
+        "searchResultId": { "$ref": "#/definitions/SearchResultId" },
+        "ordinal": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "Report": {
+      "type": "object",
+      "required": ["title", "summary", "stage", "sources"],
+      "additionalProperties": true,
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "stage": { "type": "string", "enum": ["metadata", "transcript"] },
+        "markdown": { "type": "string" },
+        "sources": { "type": "array", "items": { "$ref": "#/definitions/ReportSource" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SourceGroup": {
+      "type": "object",
+      "required": ["reportId", "turnId", "title", "createdAt", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "reportId": { "type": "string" },
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "sources": { "type": "array", "items": { "$ref": "#/definitions/ReportSource" } }
+      }
+    },
+    "ContentBinding": {
+      "type": "object",
+      "required": ["bindingId", "sessionId", "searchResultId", "contentKey", "contentType", "targetLanguage", "translationQuality", "status", "indexStatus"],
+      "additionalProperties": true,
+      "properties": {
+        "bindingId": { "$ref": "#/definitions/BindingId" },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "searchResultId": { "$ref": "#/definitions/SearchResultId" },
+        "contentKey": { "type": "string" },
+        "contentType": { "type": "string", "enum": ["podcast_episode", "video"] },
+        "targetLanguage": { "type": "string" },
+        "translationQuality": { "$ref": "#/definitions/TranslationQuality" },
+        "v10JobId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "status": { "type": "string" },
+        "stage": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "indexStatus": { "type": "string" },
+        "error": { "anyOf": [{ "$ref": "#/definitions/ErrorBody" }, { "type": "null" }] },
+        "reused": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SourceListResponse": {
+      "type": "object",
+      "required": ["binding"],
+      "additionalProperties": false,
+      "properties": {
+        "binding": { "anyOf": [{ "$ref": "#/definitions/ContentBinding" }, { "type": "null" }] }
+      }
+    },
+    "SessionSnapshot": {
+      "type": "object",
+      "required": ["sessionId", "title", "phase", "createdAt", "updatedAt", "messages", "searchResults"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "title": { "type": "string" },
+        "phase": { "type": "string" },
+        "outputLanguage": { "type": "string" },
+        "storefront": { "type": "string" },
+        "targetLanguage": { "type": "string" },
+        "translationQuality": { "$ref": "#/definitions/TranslationQuality" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "messages": { "type": "array", "items": { "$ref": "#/definitions/AssistantMessage" } },
+        "report": { "anyOf": [{ "$ref": "#/definitions/Report" }, { "type": "null" }] },
+        "sourceGroups": { "type": "array", "items": { "$ref": "#/definitions/SourceGroup" } },
+        "searchResults": { "type": "array", "items": { "$ref": "#/definitions/SearchResult" } },
+        "searchRuns": { "type": "array", "items": { "$ref": "#/definitions/SearchRun" } },
+        "binding": { "anyOf": [{ "$ref": "#/definitions/ContentBinding" }, { "type": "null" }] },
+        "activeTurn": { "anyOf": [{ "$ref": "#/definitions/TurnSummary" }, { "type": "null" }] }
+      }
+    },
+    "SseEventData": {
+      "type": "object",
+      "required": ["schemaVersion", "sessionId", "turnId", "sequence", "occurredAt", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "type": "integer", "const": 1 },
+        "sessionId": { "$ref": "#/definitions/SessionId" },
+        "turnId": { "$ref": "#/definitions/TurnId" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "payload": { "type": "object" }
+      }
+    },
+    "HealthLiveResponse": {
+      "type": "object",
+      "required": ["status", "service", "version"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "type": "string", "enum": ["live"] },
+        "service": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "HealthReadyResponse": {
+      "type": "object",
+      "required": ["status", "service", "version", "checks"],
+      "additionalProperties": true,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "degraded"] },
+        "service": { "type": "string" },
+        "version": { "type": "string" },
+        "checks": { "type": "object" }
+      }
+    }
+  }
+}

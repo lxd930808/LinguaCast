@@ -40,20 +40,14 @@ final class PipelineRunner {
 
     @ObservationIgnored private let feedService = PodcastFeedService()
     @ObservationIgnored private let fileStore = LocalFileStore()
-    @ObservationIgnored private let ossClient = AliyunOSSClient()
-    @ObservationIgnored private let transcriptionClient = DashScopeTranscriptionClient()
-    @ObservationIgnored private let translationClient = TranslationClient()
-    @ObservationIgnored private let displayRefiner: SubtitleDisplayRefiner
     @ObservationIgnored private let subtitleSync: SubtitleArtifactSyncing
     @ObservationIgnored private let completionReconciler: PodcastCompletionReconciler
     /// Cloud content job client factory (V10 / WP11); injectable for tests.
     @ObservationIgnored private let cloudClientProvider: (AppConfiguration) -> CloudContentJobClient?
     /// Remote job record store factory; injectable so tests stay in-memory.
     @ObservationIgnored private let remoteJobStoreProvider: () throws -> RemoteContentJobStore
-    @ObservationIgnored private let audioFileLock = NSLock()
     @ObservationIgnored private var runningTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var taskGenerations: [String: Int] = [:]
-    @ObservationIgnored private var runningVariantIDs: Set<String> = []
     @ObservationIgnored private var refreshingSubscriptionIDs: Set<String> = []
 
     init(
@@ -65,7 +59,6 @@ final class PipelineRunner {
         let sync = subtitleSync ?? CloudSyncCoordinator.shared
         self.subtitleSync = sync
         self.completionReconciler = completionReconciler ?? PodcastCompletionReconciler()
-        self.displayRefiner = SubtitleDisplayRefiner(subtitleSync: sync)
         self.cloudClientProvider = cloudClientProvider ?? {
             CloudContentGatewayFactory.makeClient(configuration: $0)
         }
@@ -80,9 +73,12 @@ final class PipelineRunner {
         completionReconciler.reconcileRunningEpisodes(context: context)
     }
 
-    /// Re-schedules persisted `running` episodes that have no in-memory pipeline task
-    /// (orphans left by force-quit / crash mid-download or ASR). Call after
-    /// `reconcileCompletions` so fully-translated orphans are promoted first.
+    /// Re-attaches persisted `running` episodes that have no in-memory task. Call after
+    /// `reconcileCompletions` so fully-translated orphans are promoted first. Since V18
+    /// only content-service jobs resume: an episode with a persisted remote job record
+    /// re-attaches to it, a complete on-disk translation is committed, and a task left
+    /// by the removed on-device pipeline stops with a retry entry instead of being
+    /// resubmitted automatically (which would silently spend the account's quota).
     @discardableResult
     func resumeOrphanedPipelines(
         context: ModelContext,
@@ -93,6 +89,7 @@ final class PipelineRunner {
         ))) ?? []
         var resumed = 0
         let target = configuration.translationTarget
+        let store = try? remoteJobStoreProvider()
         for episode in running {
             let taskID = episodeTaskID(episodeID: episode.id, target: target)
             let hasTask = runningTasks[taskID] != nil
@@ -100,76 +97,40 @@ final class PipelineRunner {
                 status: episode.status,
                 hasInMemoryTask: hasTask
             ) else { continue }
-            if configuration.generationBackendMode == .local,
-               episode.pipelineStep == "transcribe",
-               let files = try? fileStore.episodeFiles(episodeID: episode.id),
-               !FileManager.default.fileExists(atPath: files.rawTranscription.fileSystemPath),
-               !FileManager.default.fileExists(atPath: files.asrCheckpoint.fileSystemPath) {
-                fail(
-                    episode,
-                    target: target,
-                    context: context,
-                    message: L10n.string(
-                        "error.asr_resume_data_missing",
-                        fallback: "The previous transcription cannot be resumed because its task information was not saved. Tap Retry to start it again."
-                    )
-                )
-                continue
+            let subscription = fetchSubscription(for: episode, context: context)
+            let contentKey = cloudContentKey(episode: episode, subscription: subscription)
+            if let store, !store.records(contentKey: contentKey).isEmpty {
+                scheduleCloud(episode: episode, context: context, configuration: configuration)
+                resumed += 1
+            } else if hasCompleteLocalTranslation(episodeID: episode.id, target: target) {
+                commitLocalTranslation(episode: episode, target: target, context: context)
+            } else {
+                stopRemovedLocalTask(episode, context: context)
             }
-            schedule(
-                episode: episode,
-                context: context,
-                configuration: configuration,
-                bypassCloudCheck: shouldBypassCloudCheckWhenResuming(
-                    episodeID: episode.id,
-                    target: target
-                )
-            )
-            resumed += 1
         }
-        // Cloud mode: resume/adopt remote jobs persisted before the last quit and
-        // reconcile any non-terminal records whose episodes are not `running`
-        // (e.g. quit right after submit, while the job was still queued).
-        if configuration.generationBackendMode == .cloud {
-            Task { [weak self] in
-                await self?.reconcileRemoteJobs(context: context, configuration: configuration)
-            }
+        // Resume/adopt remote jobs persisted before the last quit and reconcile any
+        // non-terminal records whose episodes are not `running` (e.g. quit right
+        // after submit, while the job was still queued).
+        Task { [weak self] in
+            await self?.reconcileRemoteJobs(context: context, configuration: configuration)
         }
         return resumed
     }
 
-    private func shouldBypassCloudCheckWhenResuming(
-        episodeID: String,
-        target: TranslationTarget
-    ) -> Bool {
-        guard let episodeFiles = try? fileStore.episodeFiles(episodeID: episodeID),
-              let rawSegments = try? fileStore.readJSON(
-                [LearningSegment].self,
-                from: episodeFiles.rawTranscription
-              ),
-              !rawSegments.isEmpty
-        else { return false }
+    /// Stable error code for episodes interrupted inside the removed on-device pipeline.
+    static let localPipelineRemovedCode = "LOCAL_PIPELINE_REMOVED"
 
-        let translatedSegments: [LearningSegment]
-        if let translationFiles = try? fileStore.translationFiles(
-            episodeID: episodeID,
-            target: target
-        ) {
-            translatedSegments = (try? fileStore.readJSON(
-                [LearningSegment].self,
-                from: translationFiles.segments
-            )) ?? []
-        } else {
-            translatedSegments = []
-        }
-        let translatedCount = translatedSegments.filter {
-            !$0.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.count
-        return PodcastTranslationAutoResumePolicy.shouldBypassCloudCheck(
-            hasLocalSource: true,
-            translatedCount: translatedCount,
-            totalCount: rawSegments.count
-        )
+    /// Marks an episode interrupted in the removed on-device pipeline as failed. Its
+    /// downloaded audio and partial files stay on disk; Retry submits it to the content
+    /// service. Written regardless of the active target so it never stays `running`.
+    private func stopRemovedLocalTask(_ episode: EpisodeRecord, context: ModelContext) {
+        episode.status = "failed"
+        episode.pipelineMessage = "failed"
+        episode.pipelineProgress = nil
+        episode.errorMessage = Self.localPipelineRemovedCode
+        episode.updatedAt = Date()
+        try? context.save()
+        lastMessage = Self.localPipelineRemovedCode
     }
 
     /// Clears transcription/translation artifacts (keeps `source.mp3` and the catalog row),
@@ -181,11 +142,10 @@ final class PipelineRunner {
     ) async {
         await cancelAndWait(episodeID: episode.id)
         let episodeID = episode.id
-        // Cloud mode: cancel the remote jobs WITHOUT purging shared source
-        // artifacts, then drop the local records so the re-schedule below
-        // submits fresh (a new pipeline version server-side).
-        if configuration.generationBackendMode == .cloud,
-           let client = cloudClientProvider(configuration),
+        // Cancel the remote jobs WITHOUT purging shared source artifacts, then
+        // drop the local records so the re-schedule below submits fresh (a new
+        // pipeline version server-side).
+        if let client = cloudClientProvider(configuration),
            let store = try? remoteJobStoreProvider() {
             let subscription = fetchSubscription(for: episode, context: context)
             let contentKey = cloudContentKey(episode: episode, subscription: subscription)
@@ -232,44 +192,7 @@ final class PipelineRunner {
             )
         }
         try? context.save()
-        schedule(
-            episode: episode,
-            context: context,
-            configuration: configuration,
-            bypassCloudCheck: false
-        )
-    }
-
-    /// Resumes pending/running display refinement for completed podcast translations.
-    /// Dedupes via the same `episode:id:target` task IDs used by the main pipeline.
-    func resumePendingDisplayRefinements(
-        context: ModelContext,
-        configuration: AppConfiguration
-    ) {
-        let episodes = (try? context.fetch(FetchDescriptor<EpisodeRecord>(
-            predicate: #Predicate { $0.status == "completed" }
-        ))) ?? []
-        for episode in episodes {
-            guard let raw = episode.activeTranslationTargetLanguage,
-                  let target = TranslationTarget(rawValue: raw),
-                  let files = try? fileStore.translationFiles(episodeID: episode.id, target: target),
-                  let manifest = try? fileStore.readJSON(TranslationArtifactManifest.self, from: files.manifest)
-            else { continue }
-            let status = DisplayRefinementManifestPolicy.effectiveStatus(
-                from: manifest.displayRefinementStatus
-            )
-            guard DisplayRefinementManifestPolicy.needsResume(status),
-                  let fingerprint = manifest.sourceFingerprint,
-                  !fingerprint.isEmpty
-            else { continue }
-            scheduleDisplayRefinement(
-                episode: episode,
-                target: target,
-                configuration: configuration,
-                sourceFingerprint: fingerprint,
-                context: context
-            )
-        }
+        schedule(episode: episode, context: context, configuration: configuration)
     }
 
     func refresh(
@@ -284,19 +207,11 @@ final class PipelineRunner {
 
     func start(episode: EpisodeRecord, context: ModelContext, configuration: AppConfiguration) {
         guard episode.status != "running", episode.status != "completed" else { return }
-        schedule(episode: episode, context: context, configuration: configuration, bypassCloudCheck: false)
+        schedule(episode: episode, context: context, configuration: configuration)
     }
 
     func retry(episode: EpisodeRecord, context: ModelContext, configuration: AppConfiguration) {
-        schedule(episode: episode, context: context, configuration: configuration, bypassCloudCheck: false)
-    }
-
-    func generateWithoutCloudCheck(
-        episode: EpisodeRecord,
-        context: ModelContext,
-        configuration: AppConfiguration
-    ) {
-        schedule(episode: episode, context: context, configuration: configuration, bypassCloudCheck: true)
+        schedule(episode: episode, context: context, configuration: configuration)
     }
 
     /// Downloads a completed V10 job into an already-materialized assistant episode.
@@ -331,40 +246,54 @@ final class PipelineRunner {
     private func schedule(
         episode: EpisodeRecord,
         context: ModelContext,
-        configuration: AppConfiguration,
-        bypassCloudCheck: Bool
+        configuration: AppConfiguration
     ) {
-        // V10 / WP11 dispatch: the cloud backend submits/resumes a remote content
-        // job; the local backend keeps the legacy on-device pipeline as the
-        // rollback path. Legacy locally-completed content keeps playing from the
-        // local cache and is never auto-submitted to the cloud.
-        if configuration.generationBackendMode == .cloud,
-           !hasCompleteLocalTranslation(
-               episodeID: episode.id,
-               target: configuration.translationTarget
-           ) {
-            scheduleCloud(episode: episode, context: context, configuration: configuration)
+        // V18: generation always runs on the content service. A translation that is
+        // already complete on disk (for example from the removed on-device pipeline)
+        // keeps playing from the local cache and is never resubmitted.
+        let target = configuration.translationTarget
+        if hasCompleteLocalTranslation(episodeID: episode.id, target: target) {
+            commitLocalTranslation(episode: episode, target: target, context: context)
             return
         }
-        let taskID = episodeTaskID(episodeID: episode.id, target: configuration.translationTarget)
-        guard runningTasks[taskID] == nil else { return }
-        let generation = (taskGenerations[taskID] ?? 0) + 1
-        taskGenerations[taskID] = generation
-        isRunning = true
-        runningTasks[taskID] = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.taskGenerations[taskID] == generation {
-                    self.runningTasks[taskID] = nil
-                }
-                self.isRunning = !self.runningTasks.isEmpty
+        scheduleCloud(episode: episode, context: context, configuration: configuration)
+    }
+
+    /// Commits a complete on-disk translation as the finished variant without network work.
+    private func commitLocalTranslation(
+        episode: EpisodeRecord,
+        target: TranslationTarget,
+        context: ModelContext
+    ) {
+        episode.activeTranslationTargetLanguage = target.rawValue
+        do {
+            let files = try fileStore.translationFiles(episodeID: episode.id, target: target)
+            let segments = try fileStore.readJSON([LearningSegment].self, from: files.segments)
+            let episodeFiles = try fileStore.episodeFiles(episodeID: episode.id)
+            if !FileManager.default.fileExists(atPath: episodeFiles.rawTranscription.fileSystemPath) {
+                try fileStore.writeJSON(sourceSegments(from: segments), to: episodeFiles.rawTranscription)
             }
-            await self.runEpisodePipeline(
-                episode: episode,
-                context: context,
-                configuration: configuration,
-                bypassCloudCheck: bypassCloudCheck
+            let variant = try TranslationVariantRepository.getOrCreate(
+                contentKind: .podcastEpisode,
+                contentID: episode.id,
+                target: target,
+                context: context
             )
+            let manifest = try? fileStore.readJSON(TranslationArtifactManifest.self, from: files.manifest)
+            try finishSuccessfully(
+                episode: episode,
+                variant: variant,
+                target: target,
+                segments: segments,
+                files: files,
+                artifactIdentity: podcastArtifactIdentity(episode: episode, target: target, context: context),
+                context: context,
+                updatedAt: variant.updatedAt,
+                displayRefinementStatus: .completed,
+                sourceFingerprint: manifest?.sourceFingerprint
+            )
+        } catch {
+            fail(episode, target: target, context: context, message: error.localizedDescription)
         }
     }
 
@@ -545,436 +474,6 @@ final class PipelineRunner {
         }
     }
 
-    private func runEpisodePipeline(
-        episode: EpisodeRecord,
-        context: ModelContext,
-        configuration: AppConfiguration,
-        bypassCloudCheck: Bool
-    ) async {
-        let target = configuration.translationTarget
-        episode.activeTranslationTargetLanguage = target.rawValue
-        normalizeLegacyStatus(episode)
-        let variantID = TranslationVariantIdentity.make(
-            contentKind: .podcastEpisode,
-            contentID: episode.id,
-            target: target
-        )
-        guard runningVariantIDs.insert(variantID).inserted else { return }
-        defer { runningVariantIDs.remove(variantID) }
-        var retainedPlayableSource = false
-
-        do {
-            let files = try fileStore.episodeFiles(episodeID: episode.id)
-            let translationFiles = try fileStore.translationFiles(episodeID: episode.id, target: target)
-            let variant = try TranslationVariantRepository.getOrCreate(
-                contentKind: .podcastEpisode,
-                contentID: episode.id,
-                target: target,
-                context: context
-            )
-            if target == .simplifiedChinese,
-               try fileStore.migrateLegacySimplifiedChineseIfNeeded(episodeID: episode.id, to: translationFiles) {
-                variant.segmentsPath = translationFiles.segments.fileSystemPath
-            }
-            try fileStore.migrateLegacyEnglishBaseIfNeeded(episodeID: episode.id)
-            let episodeID = episode.id
-            let legacyRecords = try context.fetch(FetchDescriptor<SegmentRecord>(
-                predicate: #Predicate { $0.episodeID == episodeID }
-            ))
-            if try fileStore.migrateLegacySegmentRecordsIfNeeded(
-                legacyRecords,
-                episodeID: episode.id,
-                target: target,
-                destination: translationFiles
-            ) {
-                variant.segmentsPath = translationFiles.segments.fileSystemPath
-            }
-
-            let artifactIdentity = podcastArtifactIdentity(
-                episode: episode,
-                target: target,
-                context: context
-            )
-            var rawSegments = (try? fileStore.readJSON([LearningSegment].self, from: files.rawTranscription)) ?? []
-            if !rawSegments.isEmpty {
-                try? DashScopeCheckpointStore(fileURL: files.asrCheckpoint).remove()
-                try? FileManager.default.removeItem(at: files.asrDownloadedResult)
-            }
-            if let existing = try? fileStore.readJSON([LearningSegment].self, from: translationFiles.segments),
-               !existing.isEmpty,
-               existing.allSatisfy({ !$0.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                var selectedSegments = existing
-                var selectedUpdatedAt = variant.updatedAt
-                if let artifactIdentity {
-                    try? await subtitleSync.publishReady(
-                        identity: artifactIdentity,
-                        segments: existing,
-                        generatedAt: variant.updatedAt
-                    )
-                    if !bypassCloudCheck,
-                       case .ready(let envelope) = await subtitleSync.lookup(identity: artifactIdentity) {
-                        selectedSegments = envelope.segments
-                        selectedUpdatedAt = envelope.generatedAt
-                    }
-                }
-                if rawSegments.isEmpty || selectedSegments != existing {
-                    rawSegments = sourceSegments(from: selectedSegments)
-                    try fileStore.writeJSON(rawSegments, to: files.rawTranscription)
-                }
-                let existingManifest = try? fileStore.readJSON(
-                    TranslationArtifactManifest.self,
-                    from: translationFiles.manifest
-                )
-                let existingRefinement = DisplayRefinementManifestPolicy.effectiveStatus(
-                    from: existingManifest?.displayRefinementStatus
-                )
-                // Old ready manifests without the field are treated as already refined.
-                let shouldRefine = DisplayRefinementManifestPolicy.needsResume(existingRefinement)
-                let candidateTotal = DisplayRefinementPlanner.candidateIndices(in: selectedSegments).count
-                try finishSuccessfully(
-                    episode: episode,
-                    variant: variant,
-                    target: target,
-                    segments: selectedSegments,
-                    files: translationFiles,
-                    artifactIdentity: artifactIdentity,
-                    context: context,
-                    updatedAt: selectedUpdatedAt,
-                    displayRefinementStatus: shouldRefine ? existingRefinement : .completed,
-                    displayRefinementCompletedCount: shouldRefine ? 0 : candidateTotal,
-                    displayRefinementTotalCount: candidateTotal,
-                    publishCloud: !shouldRefine,
-                    sourceFingerprint: existingManifest?.sourceFingerprint
-                )
-                if shouldRefine {
-                    await runDisplayRefinement(
-                        episode: episode,
-                        target: target,
-                        configuration: configuration,
-                        sourceFingerprint: existingManifest?.sourceFingerprint
-                            ?? TranscriptionFingerprint.make(segments: selectedSegments),
-                        artifactIdentity: artifactIdentity,
-                        context: context
-                    )
-                }
-                return
-            }
-
-            if !bypassCloudCheck, artifactIdentity == nil {
-                pauseForCloudCheck(
-                    episode,
-                    target: target,
-                    context: context,
-                    message: L10n.string("cloud.status.failed", fallback: "iCloud Sync Failed")
-                )
-                return
-            }
-
-            if !bypassCloudCheck, let artifactIdentity {
-                try await update(
-                    episode,
-                    target: target,
-                    context: context,
-                    status: "running",
-                    step: "cloud_check",
-                    message: "cloud_check",
-                    files: files
-                )
-                switch await subtitleSync.lookup(identity: artifactIdentity) {
-                case .ready(let envelope):
-                    rawSegments = sourceSegments(from: envelope.segments)
-                    try fileStore.writeJSON(rawSegments, to: files.rawTranscription)
-                    try finishSuccessfully(
-                        episode: episode,
-                        variant: variant,
-                        target: target,
-                        segments: envelope.segments,
-                        files: translationFiles,
-                        artifactIdentity: artifactIdentity,
-                        context: context,
-                        updatedAt: envelope.generatedAt
-                    )
-                    return
-                case .sourceOnly(let envelope):
-                    rawSegments = sourceSegments(from: envelope.segments)
-                    try fileStore.writeJSON(rawSegments, to: files.rawTranscription)
-                case .notFound:
-                    break
-                case .unavailable(let message):
-                    pauseForCloudCheck(
-                        episode,
-                        target: target,
-                        context: context,
-                        message: message
-                    )
-                    return
-                }
-            }
-
-            retainedPlayableSource = !rawSegments.isEmpty
-            if rawSegments.isEmpty {
-                guard configuration.hasDashScopeASRKey, configuration.hasTranslationKey else {
-                    let code = configuration.hasDashScopeASRKey
-                        ? "missing_translation_configuration"
-                        : "missing_asr_configuration"
-                    fail(episode, target: target, context: context, message: code)
-                    return
-                }
-                try Task.checkCancellation()
-                try await update(episode, target: target, context: context, status: "running", step: "download", message: "download", files: files)
-                let source = try await downloadAudio(from: episode.enclosureURL, to: files.sourceAudio, episode: episode, target: target, context: context)
-                episode.localAudioPath = source.fileSystemPath
-
-                try Task.checkCancellation()
-                try await update(episode, target: target, context: context, status: "running", step: "oss_upload", message: "upload", files: files)
-
-                try Task.checkCancellation()
-                let asrPipeline = LocalAudioASRPipeline(transcriptionClient: transcriptionClient)
-                rawSegments = try await asrPipeline.transcribeAndSegment(
-                    audioURL: source,
-                    apiKey: configuration.dashscopeAPIKey,
-                    checkpointURL: files.asrCheckpoint,
-                    downloadedResultURL: files.asrDownloadedResult
-                ) { stage in
-                    await self.updateASRProgress(
-                        stage,
-                        episode: episode,
-                        target: target,
-                        context: context,
-                        files: files
-                    )
-                }
-                // Local acoustic–semantic segmentation already applied inside LocalAudioASRPipeline.
-                try Task.checkCancellation()
-                if retainedPlayableSource,
-                   episode.activeTranslationTargetLanguage == target.rawValue {
-                    episode.pipelineStep = "segment_source"
-                    episode.pipelineProgress = 0.69
-                    episode.pipelineMessage = "segment_source"
-                    episode.errorMessage = nil
-                    episode.updatedAt = Date()
-                    try context.save()
-                } else {
-                    try await update(
-                        episode,
-                        target: target,
-                        context: context,
-                        status: "running",
-                        step: "segment_source",
-                        message: "segment_source",
-                        files: files,
-                        progressOverride: 0.69
-                    )
-                }
-                try fileStore.writeJSON(rawSegments, to: files.rawTranscription)
-                retainedPlayableSource = !rawSegments.isEmpty
-            }
-
-            guard configuration.hasTranslationKey else {
-                fail(episode, target: target, context: context, message: "missing_translation_configuration")
-                return
-            }
-
-            if let existing = try? fileStore.readJSON([LearningSegment].self, from: translationFiles.segments),
-               !existing.isEmpty {
-                let savedFingerprint = (try? fileStore.readJSON(TranslationArtifactManifest.self, from: translationFiles.manifest))?.sourceFingerprint
-                rawSegments = TranslationResultMerger.mergeSavedTranslations(
-                    saved: existing,
-                    onto: rawSegments,
-                    savedFingerprint: savedFingerprint
-                )
-                if !rawSegments.isEmpty && rawSegments.allSatisfy({ !$0.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                    try finishSuccessfully(
-                        episode: episode,
-                        variant: variant,
-                        target: target,
-                        segments: rawSegments,
-                        files: translationFiles,
-                        artifactIdentity: artifactIdentity,
-                        context: context
-                    )
-                    return
-                }
-            }
-
-            try Task.checkCancellation()
-            if retainedPlayableSource,
-               episode.activeTranslationTargetLanguage == target.rawValue {
-                episode.pipelineStep = "translate"
-                episode.pipelineMessage = "translate"
-                episode.errorMessage = nil
-                episode.updatedAt = Date()
-            } else {
-                try await update(episode, target: target, context: context, status: "running", step: "translate", message: "translate", files: files)
-            }
-            variant.variantStatus = .running
-            variant.totalCount = rawSegments.count
-            variant.errorCode = nil
-            variant.technicalDetails = nil
-            let translatedSegments = try await translationClient.translateIncrementally(
-                rawSegments,
-                target: target,
-                configuration: configuration
-            ) { partialSegments in
-                try self.fileStore.writeJSON(partialSegments, to: translationFiles.segments)
-                variant.segmentsPath = translationFiles.segments.fileSystemPath
-                variant.translatedCount = partialSegments.filter {
-                    !$0.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }.count
-                variant.updatedAt = Date()
-                try self.writeTranslationManifest(
-                    episodeID: episode.id,
-                    target: target,
-                    variant: variant,
-                    files: translationFiles
-                )
-                try context.save()
-            }
-
-            try Task.checkCancellation()
-            // Translation is fully playable here. Commit completed/100% before any
-            // display sub-clause refinement so long-sentence LLM work cannot stall the
-            // player at `running / build_learning_pack / 90%`.
-            let completedSegments = LearningPackBuilder.buildPack(segments: translatedSegments).segments
-            let needsRefinement = DisplayRefinementPlanner.needsRefinement(completedSegments)
-            let refinementStatus: DisplayRefinementStatus = needsRefinement ? .pending : .completed
-            let refinementTotal = DisplayRefinementPlanner.candidateIndices(in: completedSegments).count
-            try finishSuccessfully(
-                episode: episode,
-                variant: variant,
-                target: target,
-                segments: completedSegments,
-                files: translationFiles,
-                artifactIdentity: artifactIdentity,
-                context: context,
-                displayRefinementStatus: refinementStatus,
-                displayRefinementCompletedCount: needsRefinement ? 0 : refinementTotal,
-                displayRefinementTotalCount: refinementTotal,
-                publishCloud: !needsRefinement
-            )
-            if needsRefinement {
-                await runDisplayRefinement(
-                    episode: episode,
-                    target: target,
-                    configuration: configuration,
-                    sourceFingerprint: TranscriptionFingerprint.make(segments: completedSegments),
-                    artifactIdentity: artifactIdentity,
-                    context: context
-                )
-            }
-        } catch is CancellationError {
-            // Never roll a completed episode back to failed/running because refinement
-            // was cancelled; leave displayRefinementStatus pending for the next resume.
-            if episode.status == "completed" {
-                return
-            }
-            if !retainedPlayableSource {
-                fail(episode, target: target, context: context, message: "cancelled")
-            }
-        } catch {
-            if episode.status == "completed" {
-                return
-            }
-            if let variant = try? TranslationVariantRepository.find(
-                contentKind: .podcastEpisode,
-                contentID: episode.id,
-                target: target,
-                context: context
-            ) {
-                variant.variantStatus = (variant.translatedCount ?? 0) > 0 ? .partial : .failed
-                variant.errorCode = "translation_failed"
-                variant.technicalDetails = error.localizedDescription
-                variant.updatedAt = Date()
-                if let translationFiles = try? fileStore.translationFiles(episodeID: episode.id, target: target) {
-                    try? writeTranslationManifest(
-                        episodeID: episode.id,
-                        target: target,
-                        variant: variant,
-                        files: translationFiles
-                    )
-                }
-            }
-            try? context.save()
-            if retainedPlayableSource,
-               episode.activeTranslationTargetLanguage == target.rawValue {
-                episode.status = "completed"
-                episode.pipelineStep = "translate"
-                episode.pipelineMessage = "translation_failed"
-                episode.errorMessage = error.localizedDescription
-                episode.updatedAt = Date()
-                try? context.save()
-            } else {
-                fail(episode, target: target, context: context, message: error.localizedDescription)
-            }
-        }
-    }
-
-    private func update(
-        _ episode: EpisodeRecord,
-        target: TranslationTarget,
-        context: ModelContext,
-        status: String,
-        step: String,
-        message: String,
-        files: EpisodeFiles,
-        progressOverride: Double? = nil
-    ) async throws {
-        guard episode.activeTranslationTargetLanguage == target.rawValue else { return }
-        episode.status = status
-        episode.pipelineStep = step
-        episode.pipelineProgress = progressOverride ?? progress(for: step)
-        episode.pipelineMessage = message
-        episode.updatedAt = Date()
-        episode.errorMessage = nil
-        lastMessage = "\(episode.episodeTitle): \(message)"
-        try fileStore.writeJSON(
-            PipelineManifest(
-                episodeID: episode.id,
-                status: status,
-                currentStep: step,
-                updatedAt: Date(),
-                error: nil,
-                artifacts: ["source_audio": files.sourceAudio.fileSystemPath]
-            ),
-            to: files.manifest
-        )
-        try context.save()
-    }
-
-    private func updateASRProgress(
-        _ stage: DashScopeTranscriptionStage,
-        episode: EpisodeRecord,
-        target: TranslationTarget,
-        context: ModelContext,
-        files: EpisodeFiles
-    ) async {
-        let presentation: (step: String, message: String, progress: Double)
-        switch stage {
-        case .preparingUpload:
-            presentation = ("oss_upload", "asr_preparing_upload", 0.28)
-        case .uploadingAudio:
-            presentation = ("oss_upload", "asr_uploading_audio", 0.34)
-        case .submitting:
-            presentation = ("transcribe", "asr_submitting", 0.44)
-        case .polling:
-            presentation = ("transcribe", "asr_polling", 0.48)
-        case .downloadingResult:
-            presentation = ("transcribe", "asr_downloading_result", 0.62)
-        case .parsingResult:
-            presentation = ("transcribe", "asr_parsing_result", 0.67)
-        }
-        try? await update(
-            episode,
-            target: target,
-            context: context,
-            status: "running",
-            step: presentation.step,
-            message: presentation.message,
-            files: files,
-            progressOverride: presentation.progress
-        )
-    }
-
     private func fail(_ episode: EpisodeRecord, target: TranslationTarget, context: ModelContext, message: String) {
         guard episode.activeTranslationTargetLanguage == target.rawValue else { return }
         episode.status = "failed"
@@ -983,156 +482,6 @@ final class PipelineRunner {
         episode.updatedAt = Date()
         try? context.save()
         lastMessage = message
-    }
-
-    private func progress(for step: String) -> Double {
-        switch step {
-        case "cloud_check": 0.02
-        case "download": 0.12
-        case "oss_upload": 0.28
-        case "transcribe": 0.48
-        case "segment_source": 0.69
-        case "translate": 0.72
-        case "build_learning_pack": 0.9
-        case "completed": 1.0
-        default: 0.05
-        }
-    }
-
-    private func downloadAudio(from value: String, to destination: URL, episode: EpisodeRecord, target: TranslationTarget, context: ModelContext) async throws -> URL {
-        guard let url = URL(string: value) else { throw PodcastFeedError.invalidURL }
-        if FileManager.default.fileExists(atPath: destination.fileSystemPath) {
-            if episode.activeTranslationTargetLanguage == target.rawValue {
-                episode.pipelineProgress = 0.26
-                episode.pipelineMessage = "download"
-                try? context.save()
-            }
-            return destination
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 900
-        let tempURL = destination
-            .deletingLastPathComponent()
-            .appending(path: "\(destination.lastPathComponent).session.\(UUID().uuidString)")
-        let progressReporter = DownloadProgressReporter(runner: self, episode: episode, target: target, context: context)
-        let downloader = AudioDownloadTask(tempURL: tempURL) { completed, expected in
-            Task { @MainActor in
-                progressReporter.update(completedBytes: completed, expectedBytes: expected)
-            }
-        }
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 900
-        let session = URLSession(configuration: configuration, delegate: downloader, delegateQueue: nil)
-        defer {
-            session.invalidateAndCancel()
-            try? FileManager.default.removeItem(at: tempURL)
-        }
-        let (downloadedTempURL, response) = try await withNetworkRetries(operation: "audio download") {
-            try await downloader.download(request: request, session: session)
-        }
-        try validateDownload(response)
-        try installDownloadedAudio(from: downloadedTempURL, to: destination)
-        if episode.activeTranslationTargetLanguage == target.rawValue {
-            episode.pipelineProgress = 0.26
-            episode.pipelineMessage = "download"
-            try? context.save()
-        }
-        return destination
-    }
-
-    fileprivate func updateDownloadProgress(episode: EpisodeRecord, target: TranslationTarget, context: ModelContext, completedBytes: Int64, expectedBytes: Int64) {
-        guard episode.activeTranslationTargetLanguage == target.rawValue,
-              episode.status == "running",
-              episode.pipelineStep == "download"
-        else { return }
-        if expectedBytes > 0 {
-            let fraction = min(max(Double(completedBytes) / Double(expectedBytes), 0), 1)
-            episode.pipelineProgress = 0.12 + fraction * 0.14
-            episode.pipelineMessage = L10n.format(
-                "pipeline.download.progress_known",
-                fallback: "Downloading source audio %@/%@",
-                formatBytes(completedBytes),
-                formatBytes(expectedBytes)
-            )
-        } else {
-            episode.pipelineProgress = max(episode.pipelineProgress ?? 0.12, 0.14)
-            episode.pipelineMessage = L10n.format(
-                "pipeline.download.progress_unknown",
-                fallback: "Downloading source audio %@",
-                formatBytes(completedBytes)
-            )
-        }
-        episode.updatedAt = Date()
-        try? context.save()
-    }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useMB, .useGB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
-    }
-
-    private func installDownloadedAudio(from temp: URL, to destination: URL) throws {
-        let fileManager = FileManager.default
-        let directory = destination.deletingLastPathComponent()
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let staging = directory.appending(path: "\(destination.lastPathComponent).download.\(UUID().uuidString)")
-        defer { try? fileManager.removeItem(at: temp) }
-        defer { try? fileManager.removeItem(at: staging) }
-
-        audioFileLock.lock()
-        defer { audioFileLock.unlock() }
-
-        if hasUsableFile(at: destination) {
-            return
-        }
-
-        try removeStaleAudioDownloads(in: directory, destination: destination)
-        if fileManager.fileExists(atPath: staging.fileSystemPath) {
-            try fileManager.removeItem(at: staging)
-        }
-        try fileManager.moveItem(at: temp, to: staging)
-
-        if hasUsableFile(at: destination) {
-            return
-        }
-
-        try? fileManager.removeItem(at: destination)
-        do {
-            try fileManager.moveItem(at: staging, to: destination)
-        } catch {
-            if hasUsableFile(at: destination) {
-                return
-            }
-            try? fileManager.removeItem(at: destination)
-            try fileManager.moveItem(at: staging, to: destination)
-        }
-    }
-
-    private func hasUsableFile(at url: URL) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.fileSystemPath),
-              let fileType = attributes[.type] as? FileAttributeType,
-              fileType == .typeRegular
-        else { return false }
-        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        return size > 0
-    }
-
-    private func removeStaleAudioDownloads(in directory: URL, destination: URL) throws {
-        let fileManager = FileManager.default
-        let prefix = "\(destination.lastPathComponent).download."
-        let files = try fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        for file in files where file.lastPathComponent.hasPrefix(prefix) {
-            try? fileManager.removeItem(at: file)
-        }
     }
 
     private func writeTranslationManifest(
@@ -1264,83 +613,6 @@ final class PipelineRunner {
         }
     }
 
-    private func scheduleDisplayRefinement(
-        episode: EpisodeRecord,
-        target: TranslationTarget,
-        configuration: AppConfiguration,
-        sourceFingerprint: String,
-        context: ModelContext
-    ) {
-        let taskID = episodeTaskID(episodeID: episode.id, target: target)
-        guard runningTasks[taskID] == nil else { return }
-        let generation = (taskGenerations[taskID] ?? 0) + 1
-        taskGenerations[taskID] = generation
-        isRunning = true
-        let artifactIdentity = podcastArtifactIdentity(episode: episode, target: target, context: context)
-        runningTasks[taskID] = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                if self.taskGenerations[taskID] == generation {
-                    self.runningTasks[taskID] = nil
-                }
-                self.isRunning = !self.runningTasks.isEmpty
-            }
-            await self.runDisplayRefinement(
-                episode: episode,
-                target: target,
-                configuration: configuration,
-                sourceFingerprint: sourceFingerprint,
-                artifactIdentity: artifactIdentity,
-                context: context
-            )
-        }
-    }
-
-    private func runDisplayRefinement(
-        episode: EpisodeRecord,
-        target: TranslationTarget,
-        configuration: AppConfiguration,
-        sourceFingerprint: String,
-        artifactIdentity: SubtitleArtifactIdentity?,
-        context: ModelContext
-    ) async {
-        do {
-            try await displayRefiner.refine(
-                episodeID: episode.id,
-                target: target,
-                configuration: configuration,
-                sourceFingerprint: sourceFingerprint,
-                artifactIdentity: artifactIdentity
-            ) { status, completed, total in
-                guard let variant = try? TranslationVariantRepository.find(
-                    contentKind: .podcastEpisode,
-                    contentID: episode.id,
-                    target: target,
-                    context: context
-                ), let files = try? self.fileStore.translationFiles(episodeID: episode.id, target: target)
-                else { return }
-                variant.updatedAt = Date()
-                try self.writeTranslationManifest(
-                    episodeID: episode.id,
-                    target: target,
-                    variant: variant,
-                    files: files,
-                    sourceFingerprint: sourceFingerprint,
-                    displayRefinementStatus: status,
-                    displayRefinementCompletedCount: completed,
-                    displayRefinementTotalCount: total
-                )
-                try context.save()
-            }
-        } catch is CancellationError {
-            // Keep pending/running checkpoint for the next launch; never touch episode status.
-            return
-        } catch {
-            // File-level errors leave the checkpoint for retry; episode stays completed.
-            return
-        }
-    }
-
     private func podcastArtifactIdentity(
         episode: EpisodeRecord,
         target: TranslationTarget,
@@ -1365,37 +637,9 @@ final class PipelineRunner {
         }
     }
 
-    private func pauseForCloudCheck(
-        _ episode: EpisodeRecord,
-        target: TranslationTarget,
-        context: ModelContext,
-        message: String
-    ) {
-        guard episode.activeTranslationTargetLanguage == target.rawValue else { return }
-        episode.status = "failed"
-        episode.pipelineStep = "cloud_check"
-        episode.pipelineProgress = 0.02
-        episode.pipelineMessage = "cloud_check_required"
-        episode.errorMessage = message
-        episode.updatedAt = Date()
-        try? context.save()
-        lastMessage = message
-    }
-
-    private func normalizeLegacyStatus(_ episode: EpisodeRecord) {
-        episode.pipelineStep = LegacyPipelineStatusPolicy.normalizedCode(
-            step: episode.pipelineStep,
-            message: episode.pipelineMessage
-        )
-        if let code = LegacyPipelineStatusPolicy.code(forLegacyMessage: episode.pipelineMessage) {
-            episode.pipelineMessage = code
-        }
-    }
-
     // MARK: - Cloud orchestration (V10 / WP11)
 
-    /// Cloud-backend pipeline entry. Submits or resumes a remote content job and
-    /// never touches the local download / DashScope / TranslationClient / OSS path.
+    /// Pipeline entry: submits or resumes a remote content job for one episode.
     private func scheduleCloud(
         episode: EpisodeRecord,
         context: ModelContext,
@@ -1423,8 +667,7 @@ final class PipelineRunner {
     }
 
     /// True when the on-disk translation for (episode, target) is already complete.
-    /// Legacy locally-completed content short-circuits to the local pipeline and is
-    /// never auto-submitted to the cloud.
+    /// Such content is committed from disk and never auto-submitted to the cloud.
     private func hasCompleteLocalTranslation(episodeID: String, target: TranslationTarget) -> Bool {
         guard let files = try? fileStore.translationFiles(episodeID: episodeID, target: target),
               let segments = try? fileStore.readJSON([LearningSegment].self, from: files.segments),
@@ -1440,8 +683,7 @@ final class PipelineRunner {
     /// remote job still has work in flight. Reached through the existing RootView
     /// hooks via `resumeOrphanedPipelines`; WP14 owns explicit scene-phase wiring.
     func reconcileRemoteJobs(context: ModelContext, configuration: AppConfiguration) async {
-        guard configuration.generationBackendMode == .cloud,
-              configuration.isCloudGenerationUsable,
+        guard configuration.isCloudGenerationUsable,
               let client = cloudClientProvider(configuration),
               let store = try? remoteJobStoreProvider()
         else { return }
@@ -1638,8 +880,8 @@ final class PipelineRunner {
     }
 
     /// Handles a ready job: validates the artifact manifest, installs artifacts
-    /// atomically, then commits the episode as completed through the same write
-    /// path as the local pipeline so rendering and reconciliation do not regress.
+    /// atomically, then commits the episode as completed through the shared
+    /// completion write path so rendering and reconciliation do not regress.
     private func finishCloudJob(
         _ job: CloudContentJobResponse,
         episode: EpisodeRecord,
@@ -1857,189 +1099,6 @@ final class PipelineRunner {
         case .incompatibleSchema(let version):
             return "PIPELINE_VERSION_UNSUPPORTED: artifact schema v\(version)"
         }
-    }
-}
-
-private func validateDownload(_ response: URLResponse) throws {
-    guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-        throw PipelineError.badResponse("Audio download failed.")
-    }
-}
-
-@MainActor
-private final class DownloadProgressReporter: @unchecked Sendable {
-    private weak var runner: PipelineRunner?
-    private let episode: EpisodeRecord
-    private let target: TranslationTarget
-    private let context: ModelContext
-
-    init(runner: PipelineRunner, episode: EpisodeRecord, target: TranslationTarget, context: ModelContext) {
-        self.runner = runner
-        self.episode = episode
-        self.target = target
-        self.context = context
-    }
-
-    func update(completedBytes: Int64, expectedBytes: Int64) {
-        runner?.updateDownloadProgress(
-            episode: episode,
-            target: target,
-            context: context,
-            completedBytes: completedBytes,
-            expectedBytes: expectedBytes
-        )
-    }
-}
-
-final class AudioDownloadTask: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let tempURL: URL
-    private let onProgress: @Sendable (Int64, Int64) -> Void
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
-    private var task: URLSessionDownloadTask?
-    private var downloadedURL: URL?
-    private var response: URLResponse?
-    private var lastProgressAt = Date()
-    private var monitorTask: Task<Void, Never>?
-
-    init(tempURL: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
-        self.tempURL = tempURL
-        self.onProgress = onProgress
-    }
-
-    func download(request: URLRequest, session: URLSession) async throws -> (URL, URLResponse) {
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                withLock {
-                    self.continuation = continuation
-                    self.lastProgressAt = Date()
-                }
-
-                let task = session.downloadTask(with: request)
-                withLock {
-                    self.task = task
-                }
-                startProgressMonitor()
-                task.resume()
-            }
-        } onCancel: {
-            cancel()
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        withLock {
-            lastProgressAt = Date()
-        }
-        onProgress(totalBytesWritten, totalBytesExpectedToWrite)
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
-    ) {
-        do {
-            try? FileManager.default.removeItem(at: tempURL)
-            try FileManager.default.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try FileManager.default.moveItem(at: location, to: tempURL)
-            withLock {
-                downloadedURL = tempURL
-                response = downloadTask.response
-            }
-        } catch {
-            finish(.failure(error))
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didCompleteWithError error: Error?
-    ) {
-        if let error {
-            finish(.failure(error))
-            return
-        }
-
-        let completionState = downloadedResult()
-        let url = completionState.0
-        let response = completionState.1
-
-        guard let url, let response else {
-            finish(.failure(PipelineError.badResponse("The audio download completed but its temporary file is unavailable.")))
-            return
-        }
-        finish(.success((url, response)))
-    }
-
-    private func startProgressMonitor() {
-        monitorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-                guard let self else { return }
-                let (stalled, currentTask) = progressMonitorState()
-                if stalled {
-                    finish(.failure(PipelineError.badResponse("The audio download made no progress for 90 seconds.")))
-                    currentTask?.cancel()
-                    return
-                }
-            }
-        }
-    }
-
-    private func cancel() {
-        let currentTask = withLock { task }
-        currentTask?.cancel()
-        finish(.failure(CancellationError()))
-    }
-
-    private func finish(_ result: Result<(URL, URLResponse), Error>) {
-        let finishState = takeFinishState()
-        let continuation = finishState.0
-        let monitorTask = finishState.1
-
-        monitorTask?.cancel()
-        switch result {
-        case .success(let value):
-            continuation?.resume(returning: value)
-        case .failure(let error):
-            continuation?.resume(throwing: error)
-        }
-    }
-
-    private func progressMonitorState() -> (stalled: Bool, task: URLSessionDownloadTask?) {
-        withLock {
-            (Date().timeIntervalSince(lastProgressAt) > 90, task)
-        }
-    }
-
-    private func downloadedResult() -> (URL?, URLResponse?) {
-        withLock {
-            (downloadedURL, response)
-        }
-    }
-
-    private func takeFinishState() -> (CheckedContinuation<(URL, URLResponse), Error>?, Task<Void, Never>?) {
-        withLock {
-            let currentContinuation = continuation
-            self.continuation = nil
-            let currentMonitorTask = monitorTask
-            self.monitorTask = nil
-            return (currentContinuation, currentMonitorTask)
-        }
-    }
-
-    private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
     }
 }
 

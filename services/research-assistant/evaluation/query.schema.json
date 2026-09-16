@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linguacast.xyz/evaluation/v14-search-query.schema.json",
+  "title": "V14 labeled search evaluation query",
+  "type": "object",
+  "required": [
+    "id",
+    "query",
+    "language",
+    "intent",
+    "media",
+    "relevant",
+    "preferred",
+    "unacceptable",
+    "ambiguous",
+    "expectQualifiedHit",
+    "expectZero",
+    "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 3, "maxLength": 40 },
+    "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "language": { "type": "string", "enum": ["en", "zh"] },
+    "intent": { "type": "string", "enum": ["topic", "person", "show", "channel", "recent"] },
+    "media": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "enum": ["youtube", "podcast"] }
+    },
+    "publishedAfter": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+    "duration": { "anyOf": [{ "type": "string", "enum": ["short", "medium", "long"] }, { "type": "null" }] },
+    "relevant": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "preferred": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "unacceptable": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "ambiguous": { "type": "boolean" },
+    "expectQualifiedHit": { "type": "boolean" },
+    "expectZero": { "type": "boolean" },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["title_contains", "identity", "source_type", "publisher_contains"]
+        },
+        "terms": { "type": "array", "items": { "type": "string" } },
+        "stableId": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "sourceType": { "type": "string", "enum": ["video", "podcast_show", "podcast_episode"] }
+      }
+    }
+  }
+}

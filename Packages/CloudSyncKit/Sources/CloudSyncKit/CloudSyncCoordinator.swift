@@ -6,7 +6,6 @@ import PodcastEnglishStudioCore
 import DomainModels
 
 public enum CloudSyncPhase: Equatable, Sendable {
-    case disabled
     case starting
     case noAccount
     case awaitingAccountConfirmation
@@ -77,6 +76,8 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         }
     }
 
+    // iCloud 回归重点：container / zone / recordType / recordName 全部保持不变。
+    private static let containerIdentifier = "iCloud.com.local.PodcastEnglishStudio"
     private static let configurationRecordName = "configuration"
     private static let subtitleArtifactRecordType = "LCSubtitleArtifact"
     private static let playbackProgressRecordType = "LCPlaybackProgress"
@@ -89,7 +90,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let keychain: KeychainStore
-    @ObservationIgnored let containerIdentifier: String?
     @ObservationIgnored private let encoder = JSONEncoder()
     @ObservationIgnored private let decoder = JSONDecoder()
     @ObservationIgnored private var documents: [String: SyncDocument]
@@ -136,25 +136,14 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         return artifactStore.activeByteCount
     }
 
-    public static let shared = CloudSyncCoordinator(
-        defaults: .standard,
-        keychain: KeychainStore(),
-        containerIdentifier: CloudSyncCoordinator.configuredContainerIdentifier()
-    )
+    public static let shared = CloudSyncCoordinator(defaults: .standard, keychain: KeychainStore())
 
     /// Package-internal initializer used by `shared` and by unit tests with an isolated `UserDefaults` suite.
-    init(
-        defaults: UserDefaults,
-        keychain: KeychainStore = KeychainStore(),
-        containerIdentifier: String? = "iCloud.com.example.LinguaCast"
-    ) {
+    init(defaults: UserDefaults, keychain: KeychainStore = KeychainStore()) {
         let decoder = JSONDecoder()
         let encoder = JSONEncoder()
-        let normalizedContainerIdentifier = containerIdentifier?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
         self.defaults = defaults
         self.keychain = keychain
-        self.containerIdentifier = normalizedContainerIdentifier?.isEmpty == false ? normalizedContainerIdentifier : nil
         let storedDocuments = Self.loadAndMigrateDocuments(
             defaults: defaults,
             keychain: keychain,
@@ -211,17 +200,9 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
             defaults.set(generated, forKey: StorageKey.deviceID)
         }
         super.init()
-        if self.containerIdentifier == nil {
-            phase = .disabled
-        } else if let migrationError = storedDocuments.error ?? storedPendingApplications.error {
+        if let migrationError = storedDocuments.error ?? storedPendingApplications.error {
             phase = .failed(migrationError.localizedDescription)
         }
-    }
-
-    private static func configuredContainerIdentifier(bundle: Bundle = .main) -> String? {
-        guard let value = bundle.object(forInfoDictionaryKey: "LinguaCastCloudKitContainerIdentifier") as? String else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func loadAndMigrateDocuments(
@@ -290,7 +271,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
 
     public var statusTitle: String {
         switch phase {
-        case .disabled: CloudSyncKitL10n.string("cloud.status.disabled", fallback: "iCloud Sync Is Off")
         case .starting: CloudSyncKitL10n.string("cloud.status.starting", fallback: "Checking iCloud")
         case .noAccount: CloudSyncKitL10n.string("cloud.status.no_account", fallback: "Not Signed In to iCloud")
         case .awaitingAccountConfirmation: CloudSyncKitL10n.string("cloud.status.account_changed", fallback: "iCloud Account Changed")
@@ -302,7 +282,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
 
     public var statusDetail: String {
         switch phase {
-        case .disabled: return CloudSyncKitL10n.string("cloud.detail.disabled", fallback: "CloudKit is not configured. Local data remains available on this device.")
         case .starting: return CloudSyncKitL10n.string("cloud.detail.starting", fallback: "Checking the account and cloud changes.")
         case .noAccount: return CloudSyncKitL10n.string("cloud.detail.no_account", fallback: "Local data remains available. Sync starts after you sign in to iCloud.")
         case .awaitingAccountConfirmation: return CloudSyncKitL10n.string("cloud.detail.account_changed", fallback: "Confirm before merging local data into the new account.")
@@ -326,10 +305,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
         settings.onSave = { [weak self, weak settings] keys, modifiedAt in
             guard let self, let settings else { return }
             self.recordConfigurationChange(keys, configuration: settings.configuration, modifiedAt: modifiedAt)
-        }
-        guard containerIdentifier != nil else {
-            phase = .disabled
-            return
         }
         guard startTask == nil, engine == nil else { return }
         phase = .starting
@@ -723,10 +698,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
     /// 若 engine 尚未建立，先等待启动中的 startTask，再根据情况启动或同步。
     @discardableResult
     public func syncNow() async -> CloudSyncPhase {
-        guard containerIdentifier != nil else {
-            phase = .disabled
-            return phase
-        }
         guard phase != .awaitingAccountConfirmation else { return phase }
         // 等待启动中的 sync engine（startTask 完成后 engine 才会就绪）。
         if let startTask { await startTask.value }
@@ -761,15 +732,6 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
     public func lookup(identity: SubtitleArtifactIdentity) async -> SubtitleArtifactLookupResult {
         if let startTask { await startTask.value }
         switch phase {
-        case .disabled:
-            if let envelope = artifactStore.envelope(for: identity) {
-                return .ready(envelope)
-            }
-            if let entry = artifactStore.entry(for: identity), !entry.metadata.isDeleted {
-                try? artifactStore.removeEntry(for: identity)
-                subtitleCacheRevision &+= 1
-            }
-            return .notFound
         case .synced, .syncing:
             await syncNow()
         case .starting:
@@ -1013,11 +975,7 @@ public final class CloudSyncCoordinator: NSObject, CKSyncEngineDelegate, Subtitl
     // MARK: Engine lifecycle
 
     private func establishEngine() async {
-        guard let containerIdentifier else {
-            phase = .disabled
-            return
-        }
-        let container = CKContainer(identifier: containerIdentifier)
+        let container = CKContainer(identifier: Self.containerIdentifier)
         do {
             guard try await container.accountStatus() == .available else {
                 phase = .noAccount

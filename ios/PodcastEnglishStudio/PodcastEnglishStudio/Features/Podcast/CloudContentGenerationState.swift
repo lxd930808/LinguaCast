@@ -172,6 +172,21 @@ enum CloudErrorMessagePresenter {
                 "cloud.error.invalid_response",
                 fallback: "The content service returned an invalid response."
             )
+        case "LOCAL_PIPELINE_REMOVED":
+            return L10n.string(
+                "cloud.error.local_pipeline_removed",
+                fallback: "On-device processing is no longer available. Tap Retry to process this episode in the cloud."
+            )
+        case "QUOTA_EXCEEDED":
+            return L10n.string(
+                "cloud.error.quota_exceeded",
+                fallback: "Today's free processing time is used up. It resets at midnight China Standard Time."
+            )
+        case "QUOTA_REQUEST_TOO_LARGE":
+            return L10n.string(
+                "cloud.error.quota_request_too_large",
+                fallback: "This item is longer than the free daily processing time."
+            )
         default:
             break
         }

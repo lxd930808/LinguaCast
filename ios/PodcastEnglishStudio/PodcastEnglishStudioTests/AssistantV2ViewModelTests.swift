@@ -173,11 +173,6 @@ private extension JSONDecoder {
 }
 
 final class AssistantV2ViewModelTests: XCTestCase {
-    func testFeatureFlagDefaultsOff() {
-        XCTAssertEqual(AssistantV2FeatureFlag.defaultsKey, "assistant.v2WorkspaceEnabled")
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: AssistantV2FeatureFlag.defaultsKey))
-    }
-
     func testUnknownEventsRefreshSnapshot() {
         XCTAssertTrue(AssistantV2ViewModel.shouldRefreshSnapshot(for: .unknown("agent.thought")))
         XCTAssertTrue(AssistantV2SseEventType.unknown("agent.thought").shouldRefreshSnapshot)
@@ -348,6 +343,17 @@ final class AssistantV2ViewModelTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testQuotaExceededErrorIsDescribed() throws {
+        let data = Data(#"{"code":"QUOTA_EXCEEDED","message":"daily limit","retryable":false,"retryAfterSeconds":3600,"params":{"kind":"assistant","limit":20,"remaining":0}}"#.utf8)
+        let body = try JSONDecoder().decode(AssistantErrorBody.self, from: data)
+        XCTAssertEqual(body.params?["limit"], "20")
+        XCTAssertEqual(
+            AssistantV2ViewModel.describe(.http(status: 429, server: body)),
+            "You've used today's free assistant turns. They reset at midnight China Standard Time."
+        )
+    }
+
     // MARK: - Turn work (thinking cards + tool rows)
 
     private struct SSEFixtureEnvelope: Decodable {
@@ -490,24 +496,6 @@ final class AssistantV2ViewModelTests: XCTestCase {
             tools: [AssistantV2TurnWorkTool(callId: "c1", tool: "save_research_report", labelKey: "save_research_report", status: "completed")]
         )
         XCTAssertEqual(AssistantV2ViewModel.foldSummary(for: work, isRunning: false), "Thought")
-    }
-
-    func testLegacyReadOnlyIsDescribedOnV1ViewModel() {
-        let error = AssistantGatewayError.http(
-            status: 409,
-            server: AssistantErrorBody(
-                code: "LEGACY_SESSION_READ_ONLY",
-                message: "legacy",
-                retryable: false,
-                traceId: "t"
-            )
-        )
-        XCTAssertTrue(AssistantViewModel.isLegacyReadOnly(error))
-        XCTAssertTrue(AssistantV2ViewModel.isLegacyReadOnly(error))
-        XCTAssertEqual(
-            AssistantViewModel.describe(error),
-            "Previous sessions are read-only. Turn on V15 research in Settings to start a new workspace."
-        )
     }
 }
 #endif

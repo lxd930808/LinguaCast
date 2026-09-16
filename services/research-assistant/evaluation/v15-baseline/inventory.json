@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-03T07:50:00Z",
+  "gitCommit": "75ab9725fac556bbc4be202f7c5d2a96ad927008",
+  "source": "services/research-assistant/fixtures/contract and fixtures/transcripts",
+  "networkRequired": false,
+  "files": [
+    {
+      "file": "error-envelope-transcript-not-ready.json",
+      "bytes": 210,
+      "sha256": "c55c0f62d90652a9a60bdb2c988ff4654048add139c12c39b838e7ef4c04a43f"
+    },
+    {
+      "file": "error-envelope-unauthorized.json",
+      "bytes": 183,
+      "sha256": "8eee12406be3c23da20702b782c2908aa6eb1c4750bd49ed952bd111cf1285fb"
+    },
+    {
+      "file": "learning-segments-bilingual.json",
+      "bytes": 2431,
+      "sha256": "5013db5bba4381a3bf866a76dfe3f7b0dddc97cdaa5f4a6e3f1dd3576e74710c"
+    },
+    {
+      "file": "qa-answer-with-citations.json",
+      "bytes": 769,
+      "sha256": "87be8795d247a9185fd94f40644cb033b0c1e54fa01c9ba39048e9f38f62e36b"
+    },
+    {
+      "file": "search-run-partial.json",
+      "bytes": 828,
+      "sha256": "199387406bce5096b085b2be90122cb9d8ac61e0d03c7ca372d71a03363e39a2"
+    },
+    {
+      "file": "search-run-success.json",
+      "bytes": 2181,
+      "sha256": "95ffb0a40e1a3b997754cd82911588864e22644abd28f17d603e307bb0a89e70"
+    },
+    {
+      "file": "session-snapshot-research-happy.json",
+      "bytes": 3422,
+      "sha256": "bf73e604a088fa426dbd993ddde9fc2fe8dd3d68301f8f1313e1b52514504915"
+    },
+    {
+      "file": "session-snapshot-source-groups.json",
+      "bytes": 4834,
+      "sha256": "bed69ea7044b1e1964c4db01625c0782a2fc9186e44bfef581873a8798cfb86b"
+    },
+    {
+      "file": "sse-replay-events.json",
+      "bytes": 1734,
+      "sha256": "d673a2a55058c7eaaf41293abd0cb2d8de46db062c361807b0fdb523520d6e0c"
+    },
+    {
+      "file": "sse-search-events.json",
+      "bytes": 1701,
+      "sha256": "3578c5a91e8ccee47778d8c3bdb1da852e0330fa31e3110291dbcbcfc1fc1b28"
+    },
+    {
+      "file": "sse-title-updated.json",
+      "bytes": 370,
+      "sha256": "c83473c0005324804eaee8c75e082ee648052ce91ec524f4522a7caffea4ae59"
+    },
+    {
+      "file": "turn-accepted-research.json",
+      "bytes": 234,
+      "sha256": "9c54e1c4ccfb24956a3d61a2e92698442589669d4017cf5ebeee93c868f662a7"
+    },
+    {
+      "file": "turn-create-research.json",
+      "bytes": 206,
+      "sha256": "4bc0aeb4d83a446bd7fa329b74549e1b8f959acf5c38a3c7fc7a965830c5c18e"
+    }
+  ]
+}

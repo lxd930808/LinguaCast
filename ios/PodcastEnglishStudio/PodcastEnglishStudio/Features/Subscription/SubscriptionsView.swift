@@ -20,7 +20,6 @@ struct SubscriptionsView: View {
     @State private var errorMessage: String?
     @State private var statusMessage: String?
     @State private var presentedSheet: SubscriptionSheet?
-    @State private var contentFilter = ContentFilterService()
 
     init(selectedTab: Binding<AppTab> = .constant(.subscriptions)) {
         _selectedTab = selectedTab
@@ -76,20 +75,6 @@ struct SubscriptionsView: View {
         .linguaPage()
         .accessibilityIdentifier("screen.subscriptions")
         .navigationTitle(L10n.string("subscriptions.subscriptions", fallback: "Subscriptions"))
-        .task {
-            contentFilter.update(configuration: settings.configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: settings.configuration) { _, configuration in
-            contentFilter.update(configuration: configuration)
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: podcastSubscriptions.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
-        }
-        .onChange(of: youtubeChannels.map(\.id)) { _, _ in
-            prefetchContentFilterVerdicts()
-        }
         .toolbar {
             #if os(tvOS)
             ToolbarItem(placement: .topBarLeading) {
@@ -383,24 +368,11 @@ struct SubscriptionsView: View {
     }
 
     private var visiblePodcastSubscriptions: [PodcastSubscription] {
-        podcastSubscriptions.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
+        podcastSubscriptions
     }
 
     private var visibleYouTubeChannels: [YTChannelRecord] {
-        youtubeChannels.filter {
-            !contentFilter.isFilteredOut(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
-    }
-
-    private func prefetchContentFilterVerdicts() {
-        let items = podcastSubscriptions.map {
-            ContentFilterService.Item(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        } + youtubeChannels.map {
-            ContentFilterService.Item(id: $0.id, title: $0.displayName, channel: $0.displayName)
-        }
-        contentFilter.prefetchAgentVerdicts(items)
+        youtubeChannels
     }
 
 }

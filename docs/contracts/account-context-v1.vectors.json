@@ -1,0 +1,64 @@
+{
+  "contract": "account-v1-integration §2.3 signed account context",
+  "note": "Test-only key. Every backend service must sign identically (same JSON field order) and verify every case.",
+  "key": "linguacast-account-context-test-key-000000000000",
+  "nowMs": 1789372800000,
+  "valid": [
+    {
+      "name": "apple account with operation and reservation",
+      "payload": {
+        "accountId": "acc_01K0000000000000000000000A",
+        "authMode": "apple",
+        "sessionId": "ses_01K0000000000000000000000S",
+        "operationKey": "assistant-transcript:tj_01K0000000000000000000000T",
+        "reservationId": "qr_01K0000000000000000000000R",
+        "issuer": "research-assistant",
+        "exp": 1789372920
+      },
+      "token": "v1.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEEiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzI5MjB9.oF6mpGShr947OPRKsKgdiveorNiVkiaEVLWssdGQUiI"
+    },
+    {
+      "name": "selfhost account without session",
+      "payload": {
+        "accountId": "selfhost",
+        "authMode": "selfhost",
+        "sessionId": null,
+        "issuer": "content-pipeline",
+        "exp": 1789372920
+      },
+      "token": "v1.eyJhY2NvdW50SWQiOiJzZWxmaG9zdCIsImF1dGhNb2RlIjoic2VsZmhvc3QiLCJzZXNzaW9uSWQiOm51bGwsImlzc3VlciI6ImNvbnRlbnQtcGlwZWxpbmUiLCJleHAiOjE3ODkzNzI5MjB9.V3hJ-lb-Hvmn6iVJ7a_r6FNjBNErlDI4IxgVs8-JmrI"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "payload changed after signing",
+      "token": "v1.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEIiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzI5MjB9.oF6mpGShr947OPRKsKgdiveorNiVkiaEVLWssdGQUiI",
+      "reason": "signature"
+    },
+    {
+      "name": "signed with another key",
+      "token": "v1.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEEiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzI5MjB9.Mn63mkycLYzYf3s_Xdj4y8vIMPVtQFN_-CU0fchX-SY",
+      "reason": "signature"
+    },
+    {
+      "name": "expired beyond clock skew",
+      "token": "v1.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEEiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzI3NDB9.WBUK85H1IyE_6iE9d0gjnBQiXbZ_6JqYlCL-sp7N_ug",
+      "reason": "expired"
+    },
+    {
+      "name": "expiry too far in the future",
+      "token": "v1.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEEiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzY0MDB9.e-UwQnrDTtgCLwopmSHehK42jM_6EZGWCsUt1jZlwKU",
+      "reason": "expired"
+    },
+    {
+      "name": "unsupported version",
+      "token": "v2.eyJhY2NvdW50SWQiOiJhY2NfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMEEiLCJhdXRoTW9kZSI6ImFwcGxlIiwic2Vzc2lvbklkIjoic2VzXzAxSzAwMDAwMDAwMDAwMDAwMDAwMDAwMDBTIiwib3BlcmF0aW9uS2V5IjoiYXNzaXN0YW50LXRyYW5zY3JpcHQ6dGpfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFQiLCJyZXNlcnZhdGlvbklkIjoicXJfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFIiLCJpc3N1ZXIiOiJyZXNlYXJjaC1hc3Npc3RhbnQiLCJleHAiOjE3ODkzNzI5MjB9.oF6mpGShr947OPRKsKgdiveorNiVkiaEVLWssdGQUiI",
+      "reason": "format"
+    },
+    {
+      "name": "account id outside the allowed patterns",
+      "token": "v1.eyJhY2NvdW50SWQiOiJhZG1pbiIsImF1dGhNb2RlIjoiYXBwbGUiLCJzZXNzaW9uSWQiOiJzZXNfMDFLMDAwMDAwMDAwMDAwMDAwMDAwMDAwMFMiLCJvcGVyYXRpb25LZXkiOiJhc3Npc3RhbnQtdHJhbnNjcmlwdDp0al8wMUswMDAwMDAwMDAwMDAwMDAwMDAwMDAwVCIsInJlc2VydmF0aW9uSWQiOiJxcl8wMUswMDAwMDAwMDAwMDAwMDAwMDAwMDAwUiIsImlzc3VlciI6InJlc2VhcmNoLWFzc2lzdGFudCIsImV4cCI6MTc4OTM3MjkyMH0.AMPbQfiqrRvjF_HIPSShZbW2sllL_0I4_xSCEEAleQI",
+      "reason": "payload"
+    }
+  ]
+}

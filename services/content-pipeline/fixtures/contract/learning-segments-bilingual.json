@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-Hans",
+  "segments": [
+    {
+      "sequence": 1,
+      "startMS": 0,
+      "endMS": 2640,
+      "text": "Welcome back to Slow English News.",
+      "learningText": "Welcome back to Slow English News.",
+      "translation": "欢迎回到慢速英语新闻。",
+      "speaker": "S1",
+      "notes": "",
+      "words": [
+        { "text": "Welcome", "startMS": 0, "endMS": 420 },
+        { "text": "back", "startMS": 430, "endMS": 720 },
+        { "text": "to", "startMS": 730, "endMS": 900 },
+        { "text": "Slow", "startMS": 910, "endMS": 1300 },
+        { "text": "English", "startMS": 1310, "endMS": 1900 },
+        { "text": "News", "startMS": 1910, "endMS": 2500, "punctuation": "." }
+      ],
+      "playbackSentence": {
+        "id": 1,
+        "text": "Welcome back to Slow English News.",
+        "translation": "欢迎回到慢速英语新闻。",
+        "startMS": 0,
+        "endMS": 2640
+      },
+      "timingSource": "wordTimeline"
+    },
+    {
+      "sequence": 2,
+      "startMS": 2700,
+      "endMS": 6900,
+      "text": "Today we talk about a small library, and why it matters to the town.",
+      "learningText": "Today we talk about a small library, and why it matters to the town.",
+      "translation": "今天我们谈谈一座小图书馆，以及它对这个小镇为何重要。",
+      "speaker": "S1",
+      "notes": "",
+      "words": [],
+      "playbackSentence": {
+        "id": 2,
+        "text": "Today we talk about a small library, and why it matters to the town.",
+        "translation": "今天我们谈谈一座小图书馆，以及它对这个小镇为何重要。",
+        "startMS": 2700,
+        "endMS": 6900
+      },
+      "timingSource": "semantic"
+    },
+    {
+      "sequence": 3,
+      "startMS": 2700,
+      "endMS": 4600,
+      "text": "Today we talk about a small library,",
+      "learningText": "Today we talk about a small library,",
+      "translation": "今天我们谈谈一座小图书馆，",
+      "speaker": null,
+      "notes": "",
+      "words": [],
+      "playbackSentence": {
+        "id": 2,
+        "text": "Today we talk about a small library, and why it matters to the town.",
+        "translation": "今天我们谈谈一座小图书馆，以及它对这个小镇为何重要。",
+        "startMS": 2700,
+        "endMS": 6900
+      },
+      "timingSource": "legacy"
+    }
+  ]
+}

@@ -35,32 +35,6 @@ public enum SourceGenerationStateRecoveryPolicy {
 // (raw-string based, no CloudSyncKit/DomainModels dependency) so the app glue
 // in YTLocalService and the CloudVideo*Tests share exactly one implementation.
 
-/// Decides which backend produces subtitles for newly opened videos.
-public enum CloudVideoGenerationRouting {
-    /// Raw value of GenerationBackend.cloud; matched case-insensitively with
-    /// surrounding whitespace trimmed, mirroring GenerationBackend.normalized.
-    public static let cloudBackendRawValue = "cloud"
-
-    /// New video subtitle generation defaults to a contentType=video cloud job
-    /// only when the committed backend mode is cloud.
-    public static func shouldUseCloudBackend(generationBackend: String) -> Bool {
-        generationBackend.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            == cloudBackendRawValue
-    }
-
-    /// In cloud mode platform-caption fetching is diagnostics/fallback only and
-    /// never participates in a new generation pass.
-    public static func allowsPlatformCaptionFetch(generationBackend: String) -> Bool {
-        !shouldUseCloudBackend(generationBackend: generationBackend)
-    }
-
-    /// In cloud mode the on-device audio ASR pipeline never participates in a
-    /// new generation pass (manual fallback entry points aside).
-    public static func allowsLocalAudioASR(generationBackend: String) -> Bool {
-        !shouldUseCloudBackend(generationBackend: generationBackend)
-    }
-}
-
 /// Guards against stale cloud job results: an update or ready payload may only
 /// be applied to the video whose generation pass submitted the job. Both the
 /// content key and the stable key captured at submit time must match, so a

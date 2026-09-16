@@ -216,9 +216,9 @@ struct YTIFramePlayerView: UIViewRepresentable {
     // page origin/referrer. Using youtube.com here makes the locally generated page
     // look like a same-origin YouTube page embedding itself and is rejected with
     // player error 152 on current iOS WebKit.
-    private static let embedPageURL = URL(string: "https://linguacast.example/")!
-    private static let encodedEmbedOrigin = "https%3A%2F%2Flinguacast.example"
-    private static let encodedWidgetReferrer = "https%3A%2F%2Flinguacast.example%2F"
+    private static let embedPageURL = URL(string: "https://com.local.podcastenglishstudio/")!
+    private static let encodedEmbedOrigin = "https%3A%2F%2Fcom.local.podcastenglishstudio"
+    private static let encodedWidgetReferrer = "https%3A%2F%2Fcom.local.podcastenglishstudio%2F"
 
     private static func load(videoID: String, in webView: WKWebView) {
         assert(embedPageURL.host?.hasSuffix("youtube.com") == false)

@@ -1,0 +1,11 @@
+{
+  "memoryEntryId": "me_01ARZ3NDEKTSV4RRFFQ69G5FJ0",
+  "scope": "global",
+  "type": "preference",
+  "content": "Write future reports in Simplified Chinese by default.",
+  "status": "confirmed",
+  "sourceArtifactId": null,
+  "hypothesis": false,
+  "createdAt": "2026-09-03T01:08:00Z",
+  "confirmedAt": "2026-09-03T01:08:00Z"
+}

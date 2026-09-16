@@ -302,8 +302,7 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                     isFullscreen: mode == .appFullscreen,
                     settingsPresented: showingSettings,
                     hasInteractiveSubtitleCTA: !usesReservedPanel
-                        && (viewModel.subtitleState.canGenerateFromAudio
-                            || viewModel.subtitleState.cloudCheckRequired),
+                        && viewModel.subtitleState.cloudCheckRequired,
                     onOpenSettings: { showingSettings = true },
                     onEnterFullscreen: enterFullscreen,
                     onExitFullscreen: exitFullscreen
@@ -349,23 +348,6 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                 SubtitleStatusRow(video: video, subtitleState: viewModel.subtitleState)
                     .padding(14)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                if viewModel.subtitleState.canGenerateFromAudio {
-                    Button {
-                        viewModel.subtitleState.requestGenerateFromAudio()
-                    } label: {
-                        Label(
-                            L10n.string(
-                                "ytvideo_player.generate_from_audio",
-                                fallback: "Generate bilingual content from audio"
-                            ),
-                            systemImage: "waveform"
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("player.generate-from-audio")
-                }
 
                 sentenceReadingCard
             }
@@ -436,24 +418,14 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                 Text(
                     YTSourceGenerationProgressText.title(
                         step: video.sourceGenerationStep,
-                        progress: video.sourceGenerationProgress,
-                        downloadProgress: viewModel.subtitleState.audioDownloadProgress,
-                        bytesPerSecond: viewModel.subtitleState.audioDownloadBytesPerSecond
+                        progress: video.sourceGenerationProgress
                     )
                     ?? L10n.string("common.subtitles_in_preparation", fallback: "Subtitles in preparation")
                 )
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 72)
                 if video.sourceGenerationStep != nil {
-                    if video.sourceGenerationStep == "downloading" {
-                        if let progress = viewModel.subtitleState.audioDownloadProgress {
-                            LinguaProgressBar(value: min(max(progress, 0), 1))
-                        } else {
-                            ProgressView()
-                        }
-                    } else {
-                        LinguaProgressBar(value: min(max(video.sourceGenerationProgress ?? 0.05, 0), 1))
-                    }
+                    LinguaProgressBar(value: min(max(video.sourceGenerationProgress ?? 0.05, 0), 1))
                 }
             }
 
@@ -607,21 +579,6 @@ private struct YTPlayerChromeContainer<Content: View, Subtitle: View>: View {
                                 )
                             }
                             .disabled(viewModel.isRetryingSubtitles)
-                        }
-                        if viewModel.subtitleState.canGenerateFromAudio {
-                            Button {
-                                showingSettings = false
-                                viewModel.subtitleState.requestGenerateFromAudio()
-                            } label: {
-                                Label(
-                                    L10n.string(
-                                        "ytvideo_player.generate_from_audio",
-                                        fallback: "Generate bilingual content from audio"
-                                    ),
-                                    systemImage: "waveform"
-                                )
-                            }
-                            .buttonStyle(.borderedProminent)
                         }
                     }
                 }

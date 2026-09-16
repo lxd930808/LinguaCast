@@ -44,11 +44,8 @@ extension EpisodeDetailView {
                     episode: episode,
                     progressStepTitle: progressStepTitle,
                     processingAction: processingAction,
-                    hasGenerationKeys: settings.configuration.hasRequiredGenerationKeys,
-                    hasASRKey: settings.configuration.hasDashScopeASRKey,
-                    hasTranslationKey: settings.configuration.hasTranslationKey,
+                    hasGenerationKeys: settings.configuration.isCloudGenerationUsable,
                     cloudState: cloudGenerationState,
-                    cloudSelected: cloudGenerationSelected,
                     queuedTitle: tvQueuedStateTitle,
                     displayErrorMessage: cloudAwareErrorMessage,
                     onStart: startProcessing,
@@ -56,13 +53,6 @@ extension EpisodeDetailView {
                         runner.retry(episode: episode, context: modelContext, configuration: settings.configuration)
                     },
                     cloudCheckRequired: cloudCheckRequired,
-                    onGenerateAnyway: {
-                        runner.generateWithoutCloudCheck(
-                            episode: episode,
-                            context: modelContext,
-                            configuration: settings.configuration
-                        )
-                    },
                     onClearAndRegenerate: clearAndRegenerateProcessing,
                     onOpenSettings: openSettingsAndDismiss
                 )
@@ -263,7 +253,6 @@ private struct TVEpisodeActionShelf: View {
     private enum FocusedAction: Hashable {
         case start
         case retry
-        case generateAnyway
         case clearAndRegenerate
         case settings
     }
@@ -272,17 +261,13 @@ private struct TVEpisodeActionShelf: View {
     let progressStepTitle: String
     let processingAction: PodcastEpisodeProcessingAction
     let hasGenerationKeys: Bool
-    let hasASRKey: Bool
-    let hasTranslationKey: Bool
     let cloudState: CloudContentGenerationState
-    let cloudSelected: Bool
     let queuedTitle: String
     /// Localized failure text (cloud codes resolved by the WP14 presenter).
     let displayErrorMessage: String?
     let onStart: () -> Void
     let onRetry: () -> Void
     let cloudCheckRequired: Bool
-    let onGenerateAnyway: () -> Void
     let onClearAndRegenerate: () -> Void
     let onOpenSettings: () -> Void
     @FocusState private var focusedAction: FocusedAction?
@@ -331,7 +316,7 @@ private struct TVEpisodeActionShelf: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
             PodcastPipelineStageRail(step: episode.pipelineStep)
-            if cloudSelected, cloudState.audioReady, !cloudState.subtitlesReady {
+            if cloudState.audioReady, !cloudState.subtitlesReady {
                 Label(
                     L10n.string(
                         "cloud.audio_ready",
@@ -343,7 +328,7 @@ private struct TVEpisodeActionShelf: View {
                 .foregroundStyle(LinguaTheme.success)
                 .accessibilityIdentifier("podcast.cloud-audio-ready")
             }
-            if cloudSelected, let lastUpdated = cloudState.lastUpdated {
+            if let lastUpdated = cloudState.lastUpdated {
                 Text(L10n.format(
                     "cloud.last_updated",
                     fallback: "Last updated %@",
@@ -408,13 +393,6 @@ private struct TVEpisodeActionShelf: View {
                         focus: .retry,
                         identifier: "subtitle.cloud-retry",
                         action: onRetry
-                    )
-                    actionButton(
-                        title: L10n.string("episodes.generate_bilingual_subtitles", fallback: "Generate bilingual subtitles"),
-                        systemImage: "exclamationmark.arrow.triangle.2.circlepath",
-                        focus: .generateAnyway,
-                        identifier: "subtitle.cloud-bypass",
-                        action: onGenerateAnyway
                     )
                 } else if processingAction == .start {
                     actionButton(
@@ -492,12 +470,7 @@ private struct TVEpisodeActionShelf: View {
 
     private var missingConfiguration: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !hasASRKey {
-                Label(L10n.string("settings.dashscope_api_key", fallback: "DashScope API Key"), systemImage: "xmark.circle.fill")
-            }
-            if !hasTranslationKey {
-                Label(L10n.string("settings.translation_api_key", fallback: "Translation API Key"), systemImage: "xmark.circle.fill")
-            }
+            Label(L10n.string("settings.cloud_service", fallback: "Cloud Generation Service"), systemImage: "xmark.circle.fill")
         }
         .font(.callout)
         .foregroundStyle(LinguaTheme.warning)

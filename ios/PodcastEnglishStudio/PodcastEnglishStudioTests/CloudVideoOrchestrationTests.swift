@@ -3,33 +3,11 @@ import XCTest
 @testable import PodcastEnglishStudioCore
 
 /// WP13: cloud video subtitle orchestration policies. The app glue in
-/// YTLocalService delegates every backend/guard decision to these Core types,
-/// so these tests pin the behavior the cloud path relies on:
-///  - cloud mode never involves platform captions or the on-device ASR pipeline
+/// YTLocalService delegates every guard decision to these Core types, so these
+/// tests pin the behavior the cloud path relies on:
 ///  - a stale job (previous video / previous pass) can never write results
 ///  - the segments.json artifact envelope decodes the golden fixture
 final class CloudVideoOrchestrationTests: XCTestCase {
-
-    // MARK: Backend routing
-
-    func testCloudBackendSelectedOnlyForCloudMode() {
-        XCTAssertTrue(CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: "cloud"))
-        XCTAssertTrue(CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: " Cloud "))
-        XCTAssertFalse(CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: "local"))
-        XCTAssertFalse(CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: ""))
-        XCTAssertFalse(CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: "bogus"))
-    }
-
-    func testCloudModeExcludesPlatformCaptionsAndLocalASR() {
-        // New cloud generation must not fetch platform captions (a local 429
-        // there can never block or feed a cloud job) and must not invoke the
-        // on-device audio ASR pipeline.
-        XCTAssertFalse(CloudVideoGenerationRouting.allowsPlatformCaptionFetch(generationBackend: "cloud"))
-        XCTAssertFalse(CloudVideoGenerationRouting.allowsLocalAudioASR(generationBackend: "cloud"))
-        // Local mode keeps both legacy paths available.
-        XCTAssertTrue(CloudVideoGenerationRouting.allowsPlatformCaptionFetch(generationBackend: "local"))
-        XCTAssertTrue(CloudVideoGenerationRouting.allowsLocalAudioASR(generationBackend: "local"))
-    }
 
     // MARK: Video-switch race guard
 

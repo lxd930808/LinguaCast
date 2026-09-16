@@ -3,11 +3,11 @@ import Observation
 
 enum SettingsDestination: String, Hashable, CaseIterable {
     case root
+    case account
     case iCloudSync
     case setupProgress
     case cloudService
     case translation
-    case contentFilter
     case subtitles
     case localMedia
     case advanced

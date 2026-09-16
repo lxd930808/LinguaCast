@@ -137,7 +137,7 @@ struct AssistantV2ResearchView: View {
     }
 
     /// Opens the player for a source whose transcription has finished — mirrors the V1 research
-    /// assistant's "Play" button (`AssistantSessionView.playSource`), reusing the same install
+    /// assistant's former V1 "Play" button, reusing the same install
     /// pipeline (`AssistantPlaybackPreparer`) via the V10 job id carried on the transcript job.
     private func playSource(_ source: AssistantV2DisplayedSource) async {
         guard !isPreparingPlayback else { return }

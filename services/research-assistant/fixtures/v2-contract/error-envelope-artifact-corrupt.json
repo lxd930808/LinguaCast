@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "ARTIFACT_CORRUPT",
+    "message": "Artifact hash does not match the workspace file",
+    "retryable": false,
+    "traceId": "tr_01ARZ3NDEKTSV4RRFFQ69",
+    "params": {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD0"
+    }
+  }
+}

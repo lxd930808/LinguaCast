@@ -3,12 +3,18 @@ import PodcastEnglishStudioCore
 
 public struct AppConfiguration: Equatable, Sendable {
     public var youtubeAPIKey: String = ""
+    /// Legacy on-device ASR credential (removed in V18). Kept only so stored and synced
+    /// values round-trip unchanged; no feature reads it.
     public var dashscopeAPIKey: String = ""
+    /// Legacy on-device translation provider settings (unused since V18: translation runs on
+    /// the content service and the content filter was removed). Kept only so stored and synced
+    /// values, including the secret API key, round-trip unchanged.
     public var translationProvider: String = "dashscope"
     public var translationAPIKey: String = ""
-    public var translationBaseURL: String = TranslationProviderPolicy.defaultDeepSeekBaseURL
-    public var translationModelID: String = TranslationChatRequestPolicy.defaultDeepSeekModelID
-    public var translationReasoningEffort: String = TranslationChatRequestPolicy.defaultDeepSeekReasoningEffort
+    public var translationBaseURL: String = ""
+    public var translationModelID: String = ""
+    public var translationReasoningEffort: String = ""
+    /// Legacy OSS / Minimax values (removed in V18), retained for storage compatibility only.
     public var ossAccessKeyID: String = ""
     public var ossAccessKeySecret: String = ""
     public var ossEndpoint: String = ""
@@ -36,12 +42,6 @@ public struct AppConfiguration: Equatable, Sendable {
     public var videoPlaybackRate: Double = Self.defaultVideoPlaybackRate
     // Subtitle display mode for video; one of subtitleDisplayModeOptions.
     public var subtitleDisplayMode: String = Self.defaultSubtitleDisplayMode
-    // Master switch for agent-driven content filtering.
-    public var contentFilterEnabled: Bool = false
-    // Comma/space separated keywords or channel/show names the filter should hide.
-    public var contentFilterKeywords: String = ""
-    // Free-form instruction passed to the filtering agent (e.g. "hide prank videos").
-    public var contentFilterPrompt: String = ""
     // Whether playing audio keeps the screen awake (iOS only; read by the player view).
     public var keepScreenAwake: Bool = true
     /// Internal tolerance for high-CPS caption outliers (0–5 percent). Not shown in Settings UI.
@@ -65,20 +65,15 @@ public struct AppConfiguration: Equatable, Sendable {
     public var assistantServiceBaseURL: String = Self.defaultAssistantServiceBaseURL
     /// Client bearer token for the assistant service. Stored in Keychain; never iCloud-synced in plaintext.
     public var assistantServiceToken: String = ""
-    /// Raw value of `GenerationBackend`. local = legacy on-device pipeline (rollback path);
-    /// cloud = server-side generation (V10 default once enabled).
-    public var generationBackend: String = GenerationBackend.default.rawValue
+    /// Legacy processing-mode value. V18 removed the on-device pipeline, so generation
+    /// always uses the content service; the stored value is kept for compatibility only.
+    public var generationBackend: String = ""
 
     public init() {}
 
-    /// Typed accessor for `generationBackend`; normalizes stored values.
-    public var generationBackendMode: GenerationBackend {
-        get { GenerationBackend.normalized(generationBackend) }
-        set { generationBackend = newValue.rawValue }
-    }
-
     /// Effective content service base URL (trailing slashes trimmed; empty falls back to default).
     public var normalizedContentServiceBaseURL: String {
+        if let access = AccountServiceAccess.snapshot { return access.contentBaseURL }
         let trimmed = contentServiceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return Self.defaultContentServiceBaseURL }
         var value = trimmed
@@ -88,13 +83,15 @@ public struct AppConfiguration: Equatable, Sendable {
 
     /// True when cloud generation can actually be used (enabled + token + URL).
     public var isCloudGenerationUsable: Bool {
-        contentServiceEnabled
+        if let access = AccountServiceAccess.snapshot { return access.capabilities.contentJobs }
+        return contentServiceEnabled
             && !contentServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && URL(string: normalizedContentServiceBaseURL) != nil
     }
 
     /// Effective assistant service base URL (trailing slashes trimmed).
     public var normalizedAssistantServiceBaseURL: String {
+        if let access = AccountServiceAccess.snapshot { return access.assistantBaseURL }
         let trimmed = assistantServiceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return Self.defaultAssistantServiceBaseURL }
         var value = trimmed
@@ -104,7 +101,8 @@ public struct AppConfiguration: Equatable, Sendable {
 
     /// True when the assistant tab can talk to the isolated service.
     public var isAssistantServiceUsable: Bool {
-        assistantServiceEnabled
+        if let access = AccountServiceAccess.snapshot { return access.capabilities.assistantV2 }
+        return assistantServiceEnabled
             && !assistantServiceToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && URL(string: normalizedAssistantServiceBaseURL) != nil
     }
@@ -145,14 +143,7 @@ public struct AppConfiguration: Equatable, Sendable {
         }
     }
 
-    public var hasRequiredGenerationKeys: Bool {
-        hasDashScopeASRKey && hasTranslationKey
-    }
-
-    public var hasDashScopeASRKey: Bool {
-        !dashscopeAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
+    /// True when the content-filter agent has an LLM key.
     public var hasTranslationKey: Bool {
         !translationAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -172,10 +163,17 @@ public struct AppConfiguration: Equatable, Sendable {
     public static let videoPlaybackRateOptions: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     public static let defaultSubtitleDisplayMode = "bilingual"
-    /// Default self-hosted content service entry (V10).
-    public static let defaultContentServiceBaseURL = "https://content.example.com"
-    /// Default isolated assistant service entry (V13). Distinct host from V10.
-    public static let defaultAssistantServiceBaseURL = "https://assistant.example.com"
+    /// Default self-hosted content service entry (V10). Comes from the app's Info.plist
+    /// (LINGUACAST_CONTENT_SERVICE_URL build setting; see Config/Public.xcconfig), falling
+    /// back to a placeholder outside the app bundle (e.g. `swift test`).
+    public static let defaultContentServiceBaseURL: String =
+        (Bundle.main.object(forInfoDictionaryKey: "LinguaCastContentServiceURL") as? String)
+            ?? "https://example.com"
+    /// Default isolated assistant service entry (V13). Distinct host from V10; same
+    /// Info.plist / xcconfig mechanism as `defaultContentServiceBaseURL`.
+    public static let defaultAssistantServiceBaseURL: String =
+        (Bundle.main.object(forInfoDictionaryKey: "LinguaCastAssistantServiceURL") as? String)
+            ?? "https://example.com"
     /// YouTube subtitle visibility modes shared by inline and fullscreen layouts.
     public static let subtitleDisplayModeOptions: [String] = ["bilingual", "englishOnly", "off"]
 
@@ -232,9 +230,6 @@ public struct AppConfiguration: Equatable, Sendable {
             case .preferredVideoQuality: preferredVideoQuality
             case .videoPlaybackRate: String(format: "%g", videoPlaybackRate)
             case .subtitleDisplayMode: subtitleDisplayMode
-            case .contentFilterEnabled: contentFilterEnabled ? "true" : "false"
-            case .contentFilterKeywords: contentFilterKeywords
-            case .contentFilterPrompt: contentFilterPrompt
             case .keepScreenAwake: keepScreenAwake ? "true" : "false"
             case .captionQualityOutlierTolerancePercent:
                 String(format: "%g", captionQualityOutlierTolerancePercent)
@@ -287,12 +282,6 @@ public struct AppConfiguration: Equatable, Sendable {
                 videoPlaybackRate = Self.videoPlaybackRate(from: newValue)
             case .subtitleDisplayMode:
                 subtitleDisplayMode = Self.subtitleDisplayMode(from: newValue)
-            case .contentFilterEnabled:
-                contentFilterEnabled = Self.bool(from: newValue)
-            case .contentFilterKeywords:
-                contentFilterKeywords = newValue
-            case .contentFilterPrompt:
-                contentFilterPrompt = newValue
             case .keepScreenAwake:
                 keepScreenAwake = Self.bool(from: newValue)
             case .captionQualityOutlierTolerancePercent:
@@ -313,7 +302,7 @@ public struct AppConfiguration: Equatable, Sendable {
             case .assistantServiceToken:
                 assistantServiceToken = newValue
             case .generationBackend:
-                generationBackend = GenerationBackend.normalized(newValue).rawValue
+                generationBackend = newValue
             }
         }
     }
@@ -349,9 +338,6 @@ public enum AppConfigurationKey: String, CaseIterable, Sendable {
     case preferredVideoQuality
     case videoPlaybackRate
     case subtitleDisplayMode
-    case contentFilterEnabled
-    case contentFilterKeywords
-    case contentFilterPrompt
     case keepScreenAwake
     case captionQualityOutlierTolerancePercent
     case iosYouTubePlaybackMode
@@ -362,24 +348,6 @@ public enum AppConfigurationKey: String, CaseIterable, Sendable {
     case assistantServiceBaseURL
     case assistantServiceToken
     case generationBackend
-
-    public static let translationGroup: Set<Self> = [
-        .translationProvider,
-        .translationBaseURL,
-        .translationModelID,
-        .translationReasoningEffort
-    ]
-
-    /// Non-secret settings accepted by the short-lived local setup page.
-    public static let mobileSetupAllowedKeys: Set<Self> = [
-        .translationProvider,
-        .translationBaseURL,
-        .translationModelID,
-        .translationReasoningEffort,
-        .ossEndpoint,
-        .ossBucket,
-        .ossRegion
-    ]
 
     /// Keys that participate in the Settings draft/commit workflow for subtitle presentation.
     public static let subtitlePresentationGroup: Set<Self> = [
@@ -393,23 +361,10 @@ public enum AppConfigurationKey: String, CaseIterable, Sendable {
         switch self {
         case .youtubeAPIKey, .dashscopeAPIKey, .translationAPIKey,
              .ossAccessKeyID, .ossAccessKeySecret, .minimaxAPIKey,
-             .contentServiceToken, .assistantServiceToken:
+             .assistantServiceToken:
             true
         default:
             false
         }
-    }
-}
-
-/// V10 generation backend selection. Missing/invalid stored values coerce to `.local`
-/// (the legacy on-device pipeline) so upgrades never silently switch users to cloud.
-public enum GenerationBackend: String, CaseIterable, Sendable {
-    case local
-    case cloud
-
-    public static let `default`: GenerationBackend = .local
-
-    public static func normalized(_ raw: String) -> GenerationBackend {
-        GenerationBackend(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .local
     }
 }

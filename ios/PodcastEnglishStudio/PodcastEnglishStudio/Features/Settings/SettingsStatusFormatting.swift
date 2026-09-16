@@ -11,7 +11,7 @@ enum SettingsStatusFormatting {
         switch phase {
         case .synced: "checkmark.icloud"
         case .syncing, .starting: "icloud.and.arrow.up"
-        case .disabled, .noAccount: "icloud.slash"
+        case .noAccount: "icloud.slash"
         case .awaitingAccountConfirmation: "person.crop.circle.badge.exclamationmark"
         case .failed: "exclamationmark.icloud"
         }

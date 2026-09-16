@@ -1,0 +1,49 @@
+{
+  "artifacts": [
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD0",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "kind": "web_page",
+      "status": "ready",
+      "mediaType": "text/markdown",
+      "bytes": 1234,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "producer": "fetch_web_page",
+      "sourceReference": {
+        "platform": "web",
+        "sourceId": "example-article",
+        "canonicalURL": "https://example.com/ai-accounting",
+        "contentKey": null,
+        "provider": "configured_web",
+        "retrievedAt": "2026-09-03T01:08:00Z",
+        "provenance": {
+          "extractor": "readability-v1"
+        }
+      },
+      "evidenceLevel": "primary_content",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "updatedAt": "2026-09-03T01:08:00Z"
+    },
+    {
+      "artifactId": "01ARZ3NDEKTSV4RRFFQ69G5FD1",
+      "researchId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      "kind": "youtube_search",
+      "status": "ready",
+      "mediaType": "application/json",
+      "bytes": 2048,
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "producer": "search_youtube",
+      "sourceReference": {
+        "platform": "youtube",
+        "sourceId": "dQw4w9WgXcQ",
+        "canonicalURL": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "provider": "ytdlp",
+        "retrievedAt": "2026-09-03T01:08:00Z"
+      },
+      "evidenceLevel": "search_metadata",
+      "createdAt": "2026-09-03T01:08:00Z",
+      "updatedAt": "2026-09-03T01:08:00Z"
+    }
+  ],
+  "nextCursor": null
+}

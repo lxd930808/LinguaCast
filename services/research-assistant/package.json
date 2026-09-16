@@ -1,0 +1,31 @@
+{
+  "name": "linguacast-research-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "V13 isolated research assistant: search, report, V10 bind, grounded QA",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters",
+    "test": "tsx --test tests/**/*.test.ts tests/**/**/*.test.ts",
+    "eval:search": "tsx scripts/evaluate-search.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "fast-xml-parser": "^5.11.1",
+    "ulid": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "license": "MIT"
+}

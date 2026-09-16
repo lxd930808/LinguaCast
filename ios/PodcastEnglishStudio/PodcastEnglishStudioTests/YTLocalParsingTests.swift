@@ -319,10 +319,10 @@ final class YouTubeDataAPIParserTests: XCTestCase {
 
         YouTubeDataAPIRequestPolicy.applyIOSRestrictionHeaders(
             to: &request,
-            bundleIdentifier: "com.example.LinguaCast"
+            bundleIdentifier: "com.local.PodcastEnglishStudio"
         )
 
-        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier"), "com.example.LinguaCast")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier"), "com.local.PodcastEnglishStudio")
     }
 
     func testParsesChannelResponseForHandle() throws {
@@ -480,61 +480,6 @@ final class YouTubeDataAPIParserTests: XCTestCase {
         XCTAssertEqual(error.code, 403)
         XCTAssertEqual(error.reason, "quotaExceeded")
         XCTAssertTrue(error.localizedDescription.contains("配额"))
-    }
-}
-
-final class YTCaptionServiceTests: XCTestCase {
-    func testExtractsCaptionTracksAndSelectsEnglish() throws {
-        let html = """
-        <script>
-        var ytInitialPlayerResponse = {
-          "captions": {
-            "playerCaptionsTracklistRenderer": {
-              "captionTracks": [
-                {"baseUrl":"https://example.com/en?x=1","languageCode":"en","name":{"simpleText":"English"},"isTranslatable":true},
-                {"baseUrl":"https://example.com/zh?x=1","languageCode":"zh-Hans","name":{"simpleText":"中文"}}
-              ]
-            }
-          }
-        };
-        </script>
-        """
-
-        let tracks = try YTCaptionTrackExtractor.captionTracks(fromWatchHTML: html)
-
-        XCTAssertEqual(tracks.count, 2)
-        XCTAssertNil(YTCaptionTrackExtractor.innertubeAPIKey(fromWatchHTML: html))
-        XCTAssertEqual(YTCaptionTrackExtractor.selectEnglishTrack(from: tracks)?.languageCode, "en")
-        XCTAssertEqual(YTCaptionTrackExtractor.selectChineseTrack(from: tracks)?.languageCode, "zh-Hans")
-        XCTAssertEqual(
-            YTCaptionTrackExtractor.captionURL(for: tracks[0])?.absoluteString,
-            "https://example.com/en?x=1&fmt=vtt"
-        )
-        XCTAssertEqual(
-            YTCaptionTrackExtractor.captionURL(for: tracks[0], translatedTo: "zh-Hans")?.absoluteString,
-            "https://example.com/en?x=1&fmt=vtt&tlang=zh-Hans"
-        )
-    }
-
-    func testExtractsInnertubeAPIKeyAndFallbackPlayerTracks() throws {
-        let html = #"<script>ytcfg.set({"INNERTUBE_API_KEY":"abc123"});</script>"#
-        let playerResponse = """
-        {
-          "captions": {
-            "playerCaptionsTracklistRenderer": {
-              "captionTracks": [
-                {"baseUrl":"https://www.youtube.com/api/timedtext?v=nepKKz-MzFM&lang=en","languageCode":"en","name":{"simpleText":"English"}}
-              ]
-            }
-          }
-        }
-        """
-
-        let tracks = try YTCaptionTrackExtractor.captionTracks(fromPlayerResponseData: Data(playerResponse.utf8))
-
-        XCTAssertEqual(YTCaptionTrackExtractor.innertubeAPIKey(fromWatchHTML: html), "abc123")
-        XCTAssertEqual(tracks.count, 1)
-        XCTAssertEqual(tracks[0].baseURL, "https://www.youtube.com/api/timedtext?v=nepKKz-MzFM&lang=en")
     }
 }
 
@@ -1357,21 +1302,6 @@ final class YTVTTParserTests: XCTestCase {
         let baseline = YTVTTParser.learningSegments(from: cues)
 
         XCTAssertEqual(ingested, baseline)
-    }
-
-    func testStalePipelineTranslationsAreNotEligibleForResume() {
-        XCTAssertFalse(YTSubtitleCachePolicy.shouldReuseSavedTranslations(localPipelineVersion: 2))
-        XCTAssertFalse(YTSubtitleCachePolicy.shouldReuseSavedTranslations(localPipelineVersion: 3))
-        XCTAssertTrue(YTSubtitleCachePolicy.shouldReuseSavedTranslations(localPipelineVersion: 4))
-    }
-
-    func testSimplifiedChineseMayUseYouTubeFallbackWithoutLLMKey() {
-        XCTAssertTrue(
-            YTSubtitleCachePolicy.canGenerateLocallyWithoutTranslationKey(target: .simplifiedChinese)
-        )
-        XCTAssertFalse(
-            YTSubtitleCachePolicy.canGenerateLocallyWithoutTranslationKey(target: .japanese)
-        )
     }
 
     func testPauseBasedSentenceSegmenterSplitsOnPunctuationAndPauses() {

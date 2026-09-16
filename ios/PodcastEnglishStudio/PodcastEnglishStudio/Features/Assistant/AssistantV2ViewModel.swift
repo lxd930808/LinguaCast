@@ -56,6 +56,7 @@ final class AssistantV2ViewModel {
     var snapshot: AssistantV2ResearchSnapshot?
     var reportText: String?
     var displayedSources: [AssistantV2DisplayedSource] = []
+    @ObservationIgnored private var transcriptPollTasks: [String: (UUID, Task<Void, Never>)] = [:]
     var transcriptJobs: [String: AssistantV2TranscriptJob] = [:]
     /// Per-source transcription failure, keyed by `transcribeSourceId`. Kept separate from
     /// `errorMessage` (which only renders on the Conversation pane) so a failure to even start a
@@ -147,6 +148,7 @@ final class AssistantV2ViewModel {
                 lastEventId = nil
                 refreshedUnknownTypes.removeAll()
                 reportText = nil
+                cancelTranscriptPolling()
                 transcriptJobs = [:]
                 displayedSources = []
                 turnWork = [:]
@@ -247,7 +249,7 @@ final class AssistantV2ViewModel {
                 idempotencyKey: UUID().uuidString
             )
             transcriptJobs[sourceId] = job
-            await pollTranscription(researchId: researchId, jobId: job.transcriptJobId, sourceId: sourceId)
+            startTranscriptPolling(researchId: researchId, job: job)
         } catch let error as AssistantGatewayError {
             transcriptionErrors[sourceId] = Self.describe(error)
         } catch {
@@ -284,6 +286,7 @@ final class AssistantV2ViewModel {
     }
 
     func handleBackground() {
+        cancelTranscriptPolling()
         streamTask?.cancel()
         streamTask = nil
         draftFlushTask?.cancel()
@@ -343,18 +346,32 @@ final class AssistantV2ViewModel {
         displayedSources = Self.displayedSources(artifacts: snapshot.artifacts, hits: hits)
     }
 
-    /// A real transcription (ASR + translation of a full episode) can easily run well past the
-    /// 3 minutes an earlier, tighter budget allowed for, so this polls for up to 20 minutes.
-    /// Giving up here doesn't lose the job: it keeps running server-side, and `reconcileTranscriptJobs`
-    /// picks its latest status back up the next time this research is opened.
-    private static let transcriptPollMaxAttempts = 400
-    private static let transcriptPollIntervalNanos: UInt64 = 3_000_000_000
+    private func cancelTranscriptPolling() {
+        for (_, task) in transcriptPollTasks.values { task.cancel() }
+        transcriptPollTasks.removeAll()
+    }
+
+    private func startTranscriptPolling(researchId: String, job: AssistantV2TranscriptJob) {
+        guard transcriptPollTasks[job.transcriptJobId] == nil,
+              job.status != .ready, job.status != .failedTerminal, job.status != .failedRetryable else { return }
+        let generation = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.pollTranscription(researchId: researchId, jobId: job.transcriptJobId, sourceId: job.sourceId)
+            if self.transcriptPollTasks[job.transcriptJobId]?.0 == generation {
+                self.transcriptPollTasks[job.transcriptJobId] = nil
+            }
+        }
+        transcriptPollTasks[job.transcriptJobId] = (generation, task)
+    }
 
     private func pollTranscription(researchId: String, jobId: String, sourceId: String) async {
-        for _ in 0..<Self.transcriptPollMaxAttempts {
+        while !Task.isCancelled && snapshot?.researchId == researchId {
             do {
                 let job = try await gateway.getTranscription(researchId: researchId, jobId: jobId)
+                guard !Task.isCancelled, snapshot?.researchId == researchId else { return }
                 transcriptJobs[sourceId] = job
+                transcriptionErrors[sourceId] = nil
                 switch job.status {
                 case .ready, .failedTerminal:
                     await openResearch(researchId)
@@ -365,20 +382,19 @@ final class AssistantV2ViewModel {
                     break
                 }
             } catch {
-                transcriptionErrors[sourceId] = Self.describe(error as? AssistantGatewayError ?? .transport(error.localizedDescription))
-                return
+                guard !Task.isCancelled else { return }
+                transcriptionErrors[sourceId] = L10n.string("assistant.v2.transcript.reconnecting", fallback: "Connection interrupted. Retrying…")
             }
-            try? await Task.sleep(nanoseconds: Self.transcriptPollIntervalNanos)
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
         }
     }
 
-    /// Refills `transcriptJobs` from the server so transcription progress (or a completed/failed
-    /// result) survives reopening this research, switching away and back, or the app being
-    /// relaunched — none of which keep the in-memory dictionary a poll loop writes into.
+    /// Reopening a research resumes progress polling for all unfinished jobs.
     private func reconcileTranscriptJobs(researchId: String) async {
         guard let jobs = try? await gateway.listTranscriptions(researchId: researchId) else { return }
         for job in jobs {
             transcriptJobs[job.sourceId] = job
+            startTranscriptPolling(researchId: researchId, job: job)
         }
     }
 
@@ -807,12 +823,6 @@ final class AssistantV2ViewModel {
     }
 
     nonisolated static func describe(_ error: AssistantGatewayError) -> String {
-        if error.v2Code == .legacySessionReadOnly {
-            return L10n.string(
-                "assistant.legacy.mutation_blocked",
-                fallback: "Previous sessions are read-only. Turn on V15 research in Settings to start a new workspace."
-            )
-        }
         if error.v2Code == .assistantV2Disabled {
             return L10n.string(
                 "assistant.v2.disabled",
@@ -821,6 +831,12 @@ final class AssistantV2ViewModel {
         }
         if error.v2Code == .eventCursorExpired {
             return L10n.string("assistant.v2.cursor_expired", fallback: "Refreshing the latest research state.")
+        }
+        if case .http(_, let server) = error, server?.code == "QUOTA_EXCEEDED" {
+            return L10n.string(
+                "assistant.v2.quota_exceeded",
+                fallback: "You've used today's free assistant turns. They reset at midnight China Standard Time."
+            )
         }
         switch error {
         case .http(_, let server):
@@ -832,14 +848,6 @@ final class AssistantV2ViewModel {
         case .configuration:
             return "configuration"
         }
-    }
-
-    nonisolated static func isLegacyReadOnly(_ error: AssistantGatewayError) -> Bool {
-        error.v2Code == .legacySessionReadOnly
-            || {
-                if case .http(_, let server) = error { return server?.code == "LEGACY_SESSION_READ_ONLY" }
-                return false
-            }()
     }
 
     nonisolated static func assistantSourceIdentifier(_ assistantSourceId: String?, _ sourceId: String?) -> String? {
@@ -981,12 +989,14 @@ final class AssistantV2ViewModel {
         }
     }
 
-    nonisolated static func transcriptStatusTitle(_ status: AssistantV2TranscriptJobStatus, progress: Double? = nil, error: String? = nil) -> String {
+    nonisolated static func transcriptStatusTitle(_ status: AssistantV2TranscriptJobStatus, progress: Double? = nil, error: String? = nil, installStatus: String? = nil) -> String {
         switch status {
         case .requested, .waitingService:
             return L10n.string("cloud.stage.queued", fallback: "Queued on the server")
         case .running:
-            return YTSourceGenerationProgressText.title(step: "transcribing", progress: progress, hidesZeroProgress: true) ?? PipelineStepTitle.display("transcribe")
+            if installStatus == "retrying" { return L10n.string("assistant.v2.transcript.reconnecting", fallback: "Connection interrupted. Retrying…") }
+            if installStatus == "stalled" { return L10n.string("assistant.v2.transcript.stalled", fallback: "Progress has not changed for a while. Still checking…") }
+            return YTSourceGenerationProgressText.title(step: installStatus == "translating" ? "translating" : "transcribing", progress: progress, hidesZeroProgress: true) ?? PipelineStepTitle.display("transcribe")
         case .installing:
             return L10n.string("pipeline.step.preparing", fallback: "Preparing")
         case .ready:

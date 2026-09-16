@@ -3,7 +3,6 @@ import SwiftUI
 #if os(tvOS)
 enum TVSettingsRoute: Hashable {
     case category(SettingsDestination)
-    case generationBackend
     case translationQuality
     case englishSize
     case targetScale

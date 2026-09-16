@@ -38,19 +38,16 @@ final class YTLocalService {
     private static let maxLoadAllPages = 200
 
     private let youtubeAPIClient: YouTubeDataAPIClient
-    private let captionService: YTCaptionService
     private let fileStore: YTSubtitleFileStore
     private let subtitleSync: SubtitleArtifactSyncing
 
     @MainActor
     init(
         session: URLSession = .shared,
-        captionService: YTCaptionService = YTCaptionService(),
         fileStore: YTSubtitleFileStore = YTSubtitleFileStore(),
         subtitleSync: SubtitleArtifactSyncing? = nil
     ) {
         self.youtubeAPIClient = YouTubeDataAPIClient(session: session)
-        self.captionService = captionService
         self.fileStore = fileStore
         self.subtitleSync = subtitleSync ?? CloudSyncCoordinator.shared
     }
@@ -262,7 +259,6 @@ final class YTLocalService {
         video: YTVideoRecord,
         configuration: AppConfiguration,
         context: ModelContext,
-        bypassCloudCheck: Bool = false,
         resumeCloudJob: Bool = false,
         captionIngestionPolicy: YTCaptionIngestionPolicy = .strict,
         onProgress: (@MainActor ([LearningSegment]) -> Void)? = nil
@@ -286,7 +282,6 @@ final class YTLocalService {
             }
         }
         let artifactIdentity = SubtitleArtifactIdentity.youtube(videoID: video.id, target: target)
-        var savedSourceSegments: [LearningSegment] = []
         print("YTLocalService: subtitle files ready at \(files.directory.fileSystemPath)")
         let localManifest = fileStore.readManifestIfExists(at: translationFiles.manifest)
         let localPipelineCurrent = SubtitlePipelineVersion.isCurrent(localManifest?.pipelineVersion)
@@ -298,7 +293,6 @@ final class YTLocalService {
                 && existingSourceSegments(for: video, files: files) != nil
                 && savedSegments(variant: variant, files: translationFiles) != nil
             if legacyPlayable, let source = existingSourceSegments(for: video, files: files) {
-                savedSourceSegments = source
                 let enCues = YTVTTParser.sourceCues(from: source)
                 if video.enVTTPath != files.englishVTT.fileSystemPath {
                     video.enVTTPath = files.englishVTT.fileSystemPath
@@ -338,7 +332,6 @@ final class YTLocalService {
                     policy: captionIngestionPolicy,
                     configuration: configuration
                   ) {
-            savedSourceSegments = source
             let enCues = YTVTTParser.sourceCues(from: source)
             print("YTLocalService: found existing English subtitles for \(video.id), segments=\(source.count)")
             if video.enVTTPath != files.englishVTT.fileSystemPath {
@@ -366,8 +359,7 @@ final class YTLocalService {
                     segments: readySegments,
                     generatedAt: variant.updatedAt
                 )
-                if !bypassCloudCheck,
-                   case .ready(let envelope) = await subtitleSync.lookup(identity: artifactIdentity) {
+                if case .ready(let envelope) = await subtitleSync.lookup(identity: artifactIdentity) {
                     return try restoreReadyArtifact(
                         envelope,
                         video: video,
@@ -385,7 +377,8 @@ final class YTLocalService {
             try? context.save()
         }
 
-        if !bypassCloudCheck && !(resumeCloudJob && CloudVideoGenerationRouting.shouldUseCloudBackend(generationBackend: configuration.generationBackend)) {
+        // A retry re-attaches to its cloud job directly; otherwise reuse an iCloud artifact first.
+        if !resumeCloudJob {
             switch await subtitleSync.lookup(identity: artifactIdentity) {
             case .ready(let envelope):
                 return try restoreReadyArtifact(
@@ -406,148 +399,40 @@ final class YTLocalService {
                 )
                 // Strict modes re-validate cloud source artifacts so a low-quality track
                 // accepted under the lenient iframe policy is never reused.
-                if acceptsReusedSourceSegments(
+                if !acceptsReusedSourceSegments(
                     restored,
                     policy: captionIngestionPolicy,
                     configuration: configuration
                 ) {
-                    savedSourceSegments = restored
-                } else {
-                    savedSourceSegments = []
                     video.enVTTPath = nil
                     try? context.save()
                 }
             case .notFound:
                 break
             case .unavailable(let message):
-                variant.variantStatus = .failed
-                variant.errorCode = "cloud_check_required"
-                variant.technicalDetails = message
-                applyVariant(variant, to: video)
-                try? context.save()
-                throw CloudSubtitleLookupError(message: message)
+                // An unavailable iCloud lookup must not block generation: the content
+                // service deduplicates jobs per account, so continue to the cloud job.
+                print("YTLocalService: iCloud subtitle lookup unavailable for \(video.id): \(message)")
             }
         }
 
-        // V10/WP13: when the committed backend is cloud, new generation goes to
-        // the content service as a contentType=video job. Platform-caption
-        // fetching and the on-device audio ASR pipeline stay out of this path;
-        // they remain available as diagnostics/manual fallback only.
-        if CloudVideoGenerationRouting.shouldUseCloudBackend(
-            generationBackend: configuration.generationBackend
-        ) {
-            return try await ensureSubtitlesFromCloud(
-                video: video,
-                target: target,
-                variant: variant,
-                taskGeneration: taskGeneration,
-                resumeCloudJob: resumeCloudJob,
-                configuration: configuration,
-                context: context,
-                onProgress: onProgress
-            )
-        }
-
-        // Non-Chinese targets still require an LLM key. Simplified Chinese may
-        // continue because an author track or `tlang=zh-Hans` can complete it.
-        if !configuration.hasTranslationKey,
-           !YTSubtitleCachePolicy.canGenerateLocallyWithoutTranslationKey(target: target) {
-            let message = L10n.string(
-                "subtitles.waiting_for_iphone",
-                fallback: "Subtitles will appear after they are generated on iPhone."
-            )
-            variant.variantStatus = .failed
-            variant.errorCode = "cloud_check_required"
-            variant.technicalDetails = message
-            applyVariant(variant, to: video)
-            try? context.save()
-            throw CloudSubtitleLookupError(message: message)
-        }
-
-        if !savedSourceSegments.isEmpty {
-            return try await translateSavedEnglishIfNeeded(
-                video: video,
-                sourceSegments: savedSourceSegments,
-                target: target,
-                taskGeneration: taskGeneration,
-                variant: variant,
-                configuration: configuration,
-                context: context,
-                resumeSavedTranslations: YTSubtitleCachePolicy.shouldReuseSavedTranslations(
-                    localPipelineVersion: localManifest?.pipelineVersion
-                ),
-                onProgress: onProgress
-            )
-        }
-
-        variant.variantStatus = .running
-        variant.errorCode = nil
-        variant.technicalDetails = nil
-        variant.translatedCount = nil
-        variant.totalCount = nil
-        applyVariant(variant, to: video)
-        try? context.save()
-
-        do {
-            print("YTLocalService: fetching English captions for \(video.id) policy=\(captionIngestionPolicy.rawValue)")
-            let package = try await captionService.fetchEnglishCaptionPackage(
-                videoID: video.id,
-                configuration: configuration,
-                ingestionPolicy: captionIngestionPolicy
-            )
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-            print("YTLocalService: fetched English captions for \(video.id), segments=\(package.segments.count)")
-            let files = try fileStore.files(videoID: video.id)
-            try fileStore.writeVTT(package.englishVTT, to: files.englishVTT)
-            try fileStore.writeSegments(package.segments, to: files.baseSegments)
-
-            video.enVTTPath = files.englishVTT.fileSystemPath
-            video.sourceTranscriptMethod = "youtubeCaption"
-            variant.variantStatus = .running
-            variant.translatedCount = 0
-            variant.totalCount = package.segments.count
-            applyVariant(variant, to: video)
-            try context.save()
-            onProgress?(package.segments)
-
-            return try await translateSavedEnglishIfNeeded(
-                video: video,
-                sourceSegments: package.segments,
-                target: target,
-                taskGeneration: taskGeneration,
-                variant: variant,
-                configuration: configuration,
-                context: context,
-                resumeSavedTranslations: YTSubtitleCachePolicy.shouldReuseSavedTranslations(
-                    localPipelineVersion: localManifest?.pipelineVersion
-                ),
-                onProgress: onProgress
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as YTCaptionError {
-            print("YTLocalService: subtitle fetch failed for \(video.id): \(error.localizedUserMessage)")
-            variant.variantStatus = .failed
-            variant.errorCode = error.stableErrorCode
-            variant.technicalDetails = error.localizedUserMessage
-            applyVariant(variant, to: video)
-            try? context.save()
-            throw error
-        } catch {
-            print("YTLocalService: subtitle fetch failed for \(video.id): \(error.localizedDescription)")
-            variant.variantStatus = .failed
-            variant.errorCode = "source_caption_failed"
-            variant.technicalDetails = error.localizedDescription
-            applyVariant(variant, to: video)
-            try? context.save()
-            throw error
-        }
+        // V18: new generation always goes to the content service as a
+        // contentType=video job; there is no on-device fallback.
+        return try await ensureSubtitlesFromCloud(
+            video: video,
+            target: target,
+            variant: variant,
+            taskGeneration: taskGeneration,
+            resumeCloudJob: resumeCloudJob,
+            configuration: configuration,
+            context: context,
+            onProgress: onProgress
+        )
     }
 
     /// V10/WP13 cloud generation: submit (or idempotently reuse) a
     /// contentType=video job, project server stages onto the video display
     /// fields, then download the packaged artifacts into YTSubtitleFileStore.
-    /// Never touches YTCaptionService platform captions or LocalAudioASRPipeline.
     @MainActor
     private func ensureSubtitlesFromCloud(
         video: YTVideoRecord,
@@ -916,6 +801,10 @@ final class YTLocalService {
         code: String,
         retryAfterSeconds: Int?
     ) -> String {
+        // V18 account quota refusals are not source failures; reuse the localized quota text.
+        if code == "QUOTA_EXCEEDED" || code == "QUOTA_REQUEST_TOO_LARGE" {
+            return "\(CloudErrorMessagePresenter.localizedBase(for: code)) [\(code)]"
+        }
         let base: String
         switch CloudErrorPresentationPolicy.category(forCode: code) {
         case .sourceRestricted:
@@ -942,364 +831,11 @@ final class YTLocalService {
         return "\(base) [\(code)]"
     }
 
-    /// Whether caption failure is eligible for the iPhone audio-ASR fallback CTA.
-    static func canGenerateFromAudio(after error: Error) -> Bool {
-        #if os(iOS)
-        guard let error = error as? YTCaptionError else { return false }
-        switch error {
-        case .missingEnglishTrack, .emptyCaptionFile, .emptyCaptionResponse,
-             .captionQualityRejected, .rateLimited:
-            return true
-        default:
-            return false
-        }
-        #else
-        return false
-        #endif
-    }
-
-    /// Download audio-only stream → DashScope ASR → base_segments → existing translate path.
-    @MainActor
-    func generateSubtitlesFromAudio(
-        video: YTVideoRecord,
-        configuration: AppConfiguration,
-        context: ModelContext,
-        streamResolver: YTYouTubeKitMediaStreamResolver = .shared,
-        localMediaConfig: YTLocalMediaServiceConfig? = .fromProcessEnvironment(),
-        onDownloadProgress: (@MainActor (Double?, Double?) -> Void)? = nil,
-        onProgress: (@MainActor ([LearningSegment]) -> Void)? = nil
-    ) async throws -> [LearningSegment] {
-        #if os(tvOS)
-        throw CloudSubtitleLookupError(
-            message: L10n.string(
-                "ytvideo_player.audio_asr_iphone_only",
-                fallback: "Audio subtitle generation is only available on iPhone."
-            )
-        )
-        #else
-        let taskGeneration = Self.beginSubtitleTask(videoID: video.id)
-        let target = configuration.translationTarget
-        video.activeSubtitleTargetLanguage = target.rawValue
-        let files = try fileStore.files(videoID: video.id)
-        let variant = try TranslationVariantRepository.getOrCreate(
-            contentKind: .youtubeVideo,
-            contentID: video.id,
-            target: target,
-            context: context
-        )
-        video.sourceGenerationStep = nil
-        video.sourceGenerationProgress = nil
-        onDownloadProgress?(nil, nil)
-
-        if let existing = existingSourceSegments(for: video, files: files), !existing.isEmpty {
-            return try await translateSavedEnglishIfNeeded(
-                video: video,
-                sourceSegments: existing,
-                target: target,
-                taskGeneration: taskGeneration,
-                variant: variant,
-                configuration: configuration,
-                context: context,
-                resumeSavedTranslations: true,
-                onProgress: onProgress
-            )
-        }
-
-        guard configuration.hasDashScopeASRKey else {
-            let message = L10n.string(
-                "error.missing_asr_configuration",
-                fallback: "Add a DashScope ASR API key in Settings first."
-            )
-            variant.variantStatus = .failed
-            variant.errorCode = "missing_asr_configuration"
-            variant.technicalDetails = message
-            applyVariant(variant, to: video)
-            try? context.save()
-            throw CloudSubtitleLookupError(message: message)
-        }
-        guard configuration.hasTranslationKey
-                || YTSubtitleCachePolicy.canGenerateLocallyWithoutTranslationKey(target: target)
-        else {
-            let message = L10n.string(
-                "subtitles.waiting_for_iphone",
-                fallback: "Subtitles will appear after they are generated on iPhone."
-            )
-            variant.variantStatus = .failed
-            variant.errorCode = "missing_translation_configuration"
-            variant.technicalDetails = message
-            applyVariant(variant, to: video)
-            try? context.save()
-            throw CloudSubtitleLookupError(message: message)
-        }
-
-        variant.variantStatus = .running
-        variant.errorCode = nil
-        variant.technicalDetails = nil
-        video.sourceTranscriptMethod = "audioASR"
-        video.sourceGenerationStep = "resolving"
-        video.sourceGenerationProgress = 0.05
-        applyVariant(variant, to: video)
-        try? context.save()
-
-        do {
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-            let audioURL = try await resolveAndDownloadAudio(
-                video: video,
-                files: files,
-                streamResolver: streamResolver,
-                localMediaConfig: localMediaConfig,
-                context: context,
-                onDownloadProgress: onDownloadProgress
-            )
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-
-            video.sourceGenerationStep = "uploading"
-            video.sourceGenerationProgress = 0.35
-            try? context.save()
-
-            let pipeline = LocalAudioASRPipeline()
-            let segments = try await pipeline.transcribeAndSegment(
-                audioURL: audioURL,
-                apiKey: configuration.dashscopeAPIKey,
-                checkpointURL: files.asrCheckpoint,
-                downloadedResultURL: files.asrDownloadedResult
-            ) { stage in
-                switch stage {
-                case .preparingUpload, .uploadingAudio:
-                    video.sourceGenerationStep = "uploading"
-                    video.sourceGenerationProgress = 0.4
-                case .submitting, .polling:
-                    video.sourceGenerationStep = "transcribing"
-                    video.sourceGenerationProgress = 0.55
-                case .downloadingResult, .parsingResult:
-                    video.sourceGenerationStep = "segmenting"
-                    video.sourceGenerationProgress = 0.65
-                }
-                try? context.save()
-            }
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-
-            video.sourceGenerationStep = "segmenting"
-            video.sourceGenerationProgress = 0.7
-            let englishVTT = YTVTTParser.makeVTT(from: YTVTTParser.sourceCues(from: segments))
-            try fileStore.writeVTT(englishVTT, to: files.englishVTT)
-            try fileStore.writeSegments(segments, to: files.baseSegments)
-            video.enVTTPath = files.englishVTT.fileSystemPath
-            video.sourceTranscriptMethod = "audioASR"
-            // Delete source audio only after base segments are persisted.
-            if let path = video.localAudioPath {
-                try? FileManager.default.removeItem(at: URL.storedFileURL(from: path))
-            }
-            try? FileManager.default.removeItem(at: audioURL)
-            video.localAudioPath = nil
-            applyVariant(variant, to: video)
-            try context.save()
-            onProgress?(segments)
-
-            video.sourceGenerationStep = "translating"
-            video.sourceGenerationProgress = 0.75
-            try? context.save()
-
-            let translated = try await translateSavedEnglishIfNeeded(
-                video: video,
-                sourceSegments: segments,
-                target: target,
-                taskGeneration: taskGeneration,
-                variant: variant,
-                configuration: configuration,
-                context: context,
-                resumeSavedTranslations: false,
-                onProgress: onProgress
-            )
-            video.sourceGenerationStep = nil
-            video.sourceGenerationProgress = 1
-            try? context.save()
-            return translated
-        } catch is CancellationError {
-            video.sourceGenerationStep = nil
-            video.sourceGenerationProgress = nil
-            onDownloadProgress?(nil, nil)
-            try? context.save()
-            throw CancellationError()
-        } catch {
-            variant.variantStatus = .failed
-            variant.errorCode = "audio_asr_failed"
-            variant.technicalDetails = error.localizedDescription
-            applyVariant(variant, to: video)
-            video.sourceGenerationStep = nil
-            video.sourceGenerationProgress = nil
-            onDownloadProgress?(nil, nil)
-            try? context.save()
-            throw error
-        }
-        #endif
-    }
-
-    #if os(iOS)
-    @MainActor
-    private func resolveAndDownloadAudio(
-        video: YTVideoRecord,
-        files: YTSubtitleFiles,
-        streamResolver: YTYouTubeKitMediaStreamResolver,
-        localMediaConfig: YTLocalMediaServiceConfig?,
-        context: ModelContext,
-        onDownloadProgress: (@MainActor (Double?, Double?) -> Void)?
-    ) async throws -> URL {
-        if let path = video.localAudioPath {
-            let existing = URL.storedFileURL(from: path)
-            if FileManager.default.fileExists(atPath: existing.fileSystemPath) {
-                return existing
-            }
-        }
-
-        video.sourceGenerationStep = "resolving"
-        video.sourceGenerationProgress = 0.1
-        try? context.save()
-
-        if let localMediaConfig {
-            do {
-                let client = YTLocalMediaServiceClient(config: localMediaConfig)
-                let remoteURL = try await client.reusableAudioURL(
-                    videoID: video.id,
-                    mode: .mp4,
-                    preferredHeight: localMediaConfig.preferredHeight
-                )
-                try Task.checkCancellation()
-                let fileExtension = remoteURL.pathExtension.isEmpty
-                    ? "m4a"
-                    : remoteURL.pathExtension
-                let destination = try await downloadAudioSource(
-                    from: remoteURL,
-                    fileExtension: fileExtension,
-                    video: video,
-                    files: files,
-                    context: context,
-                    onDownloadProgress: onDownloadProgress
-                )
-#if DEBUG
-                print(
-                    "YTLocalService: using local media service audio for \(video.id): \(remoteURL.absoluteString)"
-                )
-#endif
-                return destination
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                try Task.checkCancellation()
-#if DEBUG
-                print(
-                    "YTLocalService: local media audio unavailable for \(video.id), falling back to YouTubeKit: \(error.localizedDescription)"
-                )
-#endif
-            }
-        }
-
-        var streams = try await streamResolver.resolve(videoID: video.id)
-        if streams.isExpired {
-            await streamResolver.invalidate(videoID: video.id)
-            streams = try await streamResolver.resolve(videoID: video.id)
-        }
-        let audioCandidates = streams.audioOnly.filter {
-            $0.container.lowercased() == "m4a" && $0.isNativelyPlayable
-        }
-        guard let audio = audioCandidates.max(by: {
-            ($0.averageBitrate ?? $0.bitrate ?? 0) < ($1.averageBitrate ?? $1.bitrate ?? 0)
-        }) else {
-            throw YTMediaStreamResolverError.noPlayableStream
-        }
-
-        return try await downloadAudioSource(
-            from: audio.url,
-            fileExtension: audio.container,
-            video: video,
-            files: files,
-            context: context,
-            onDownloadProgress: onDownloadProgress
-        )
-    }
-
-    @MainActor
-    private func downloadAudioSource(
-        from remoteURL: URL,
-        fileExtension: String,
-        video: YTVideoRecord,
-        files: YTSubtitleFiles,
-        context: ModelContext,
-        onDownloadProgress: (@MainActor (Double?, Double?) -> Void)?
-    ) async throws -> URL {
-        video.sourceGenerationStep = "downloading"
-        video.sourceGenerationProgress = 0.2
-        onDownloadProgress?(0, nil)
-        try? context.save()
-
-        let destination = files.sourceAudio(fileExtension: fileExtension)
-        try await downloadRemoteFile(
-            from: remoteURL,
-            to: destination,
-            onProgress: { completedBytes, expectedBytes, bytesPerSecond in
-                let fraction = DownloadProgressMetrics.fraction(
-                    completedBytes: completedBytes,
-                    expectedBytes: expectedBytes
-                )
-                onDownloadProgress?(fraction, bytesPerSecond)
-                if let fraction {
-                    video.sourceGenerationProgress = 0.2 + fraction * 0.15
-                }
-            }
-        )
-        onDownloadProgress?(1, nil)
-        video.localAudioPath = destination.fileSystemPath
-        try? context.save()
-        return destination
-    }
-
-    @MainActor
-    private func downloadRemoteFile(
-        from url: URL,
-        to destination: URL,
-        onProgress: @escaping @MainActor (Int64, Int64, Double?) -> Void
-    ) async throws {
-        if FileManager.default.fileExists(atPath: destination.fileSystemPath) {
-            return
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 900
-        let tempURL = destination
-            .deletingLastPathComponent()
-            .appending(path: "\(destination.lastPathComponent).session.\(UUID().uuidString)")
-        let progressReporter = YTAudioDownloadProgressReporter(onProgress: onProgress)
-        let downloader = AudioDownloadTask(tempURL: tempURL) { completedBytes, expectedBytes in
-            Task { @MainActor in
-                progressReporter.update(
-                    completedBytes: completedBytes,
-                    expectedBytes: expectedBytes
-                )
-            }
-        }
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 900
-        let session = URLSession(configuration: configuration, delegate: downloader, delegateQueue: nil)
-        defer {
-            session.invalidateAndCancel()
-            try? FileManager.default.removeItem(at: tempURL)
-        }
-        let (downloadedURL, response) = try await downloader.download(request: request, session: session)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw YTMediaStreamResolverError.extractionFailed("Audio download failed (HTTP \(http.statusCode)).")
-        }
-        try? FileManager.default.removeItem(at: destination)
-        try FileManager.default.moveItem(at: downloadedURL, to: destination)
-    }
-    #endif
-
     @MainActor
     func retrySubtitles(
         video: YTVideoRecord,
         configuration: AppConfiguration,
         context: ModelContext,
-        bypassCloudCheck: Bool = false,
         captionIngestionPolicy: YTCaptionIngestionPolicy = .strict,
         onProgress: (@MainActor ([LearningSegment]) -> Void)? = nil
     ) async throws -> [LearningSegment] {
@@ -1307,7 +843,6 @@ final class YTLocalService {
             video: video,
             configuration: configuration,
             context: context,
-            bypassCloudCheck: bypassCloudCheck,
             resumeCloudJob: true,
             captionIngestionPolicy: captionIngestionPolicy,
             onProgress: onProgress
@@ -1325,259 +860,6 @@ final class YTLocalService {
             return vtt
         }
         return nil
-    }
-
-    private func existingTranslatedVTT(
-        variant: TranslationVariantRecord,
-        files: TranslationVariantFiles
-    ) -> String? {
-        if let path = variant.targetVTTPath,
-           let vtt = fileStore.readVTTIfExists(at: path),
-           !YTVTTParser.parse(vtt).isEmpty {
-            return vtt
-        }
-        if let vtt = fileStore.readVTTIfExists(at: files.targetVTT),
-           !YTVTTParser.parse(vtt).isEmpty {
-            return vtt
-        }
-        return nil
-    }
-
-    @MainActor
-    private func translateSavedEnglishIfNeeded(
-        video: YTVideoRecord,
-        sourceSegments: [LearningSegment],
-        target: TranslationTarget,
-        taskGeneration: Int,
-        variant: TranslationVariantRecord,
-        configuration: AppConfiguration,
-        context: ModelContext,
-        resumeSavedTranslations: Bool,
-        onProgress: (@MainActor ([LearningSegment]) -> Void)? = nil
-    ) async throws -> [LearningSegment] {
-        try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-        guard !sourceSegments.isEmpty else { throw YTCaptionError.emptyCaptionFile }
-        let files = try fileStore.translationFiles(videoID: video.id, target: target)
-        let cleanSourceSegments = sourceSegments.map { source -> LearningSegment in
-            var copy = source
-            copy.translation = ""
-            return copy
-        }
-        var segments = resumableSegments(
-            from: cleanSourceSegments,
-            saved: resumeSavedTranslations ? savedSegments(variant: variant, files: files) : nil
-        )
-        if !resumeSavedTranslations {
-            // Overwrite the old target artifact before generation. Otherwise a
-            // failed v3 rebuild could leave a poisoned v2 VTT discoverable.
-            try fileStore.writeVTT(YTVTTParser.makeVTT(from: []), to: files.targetVTT)
-            variant.targetVTTPath = nil
-        }
-        try fileStore.writeSegments(segments, to: files.segments)
-        variant.segmentsPath = files.segments.fileSystemPath
-        updateSubtitleProgress(variant, segments: segments)
-        applyVariant(variant, to: video)
-        try? context.save()
-
-        variant.variantStatus = .running
-        applyVariant(variant, to: video)
-        try? context.save()
-        onProgress?(segments)
-
-        if target == .simplifiedChinese { do {
-            let youtubeChinese = try await captionService.fetchNativeChineseVTT(videoID: video.id)
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-            let youtubeZhCues = YTVTTParser.parse(youtubeChinese)
-            if !youtubeZhCues.isEmpty {
-                let alignment = YTVTTParser.alignNativeTranslations(from: youtubeZhCues, to: segments)
-                if alignment.isAccepted {
-                    print(
-                        "YTLocalService: accepting native Chinese track for \(video.id), score=\(String(format: "%.2f", alignment.score))"
-                    )
-                    segments = alignment.segments
-                    try fileStore.writeSegments(segments, to: files.segments)
-                    // Persist a single-timeline translation VTT derived from English segment times.
-                    try fileStore.writeVTT(
-                        YTVTTParser.makeVTT(from: YTVTTParser.translatedCues(from: segments)),
-                        to: files.targetVTT
-                    )
-                    updateSubtitleProgress(variant, segments: segments)
-                    if YTSubtitleCachePolicy.savedTranslationsComplete(
-                        segments,
-                        expectedCueCount: segments.count
-                    ) {
-                        try await persistReadyTranslation(
-                            segments,
-                            video: video,
-                            target: target,
-                            variant: variant,
-                            files: files,
-                            configuration: configuration,
-                            context: context,
-                            onProgress: onProgress
-                        )
-                        return segments
-                    }
-                    // Gaps remain — fall through to LLM to fill missing translations.
-                    onProgress?(segments)
-                } else {
-                    print(
-                        "YTLocalService: rejecting native Chinese track for \(video.id), score=\(String(format: "%.2f", alignment.score)); using LLM"
-                    )
-                }
-            }
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            print("YTLocalService: no native Chinese subtitles for \(video.id), falling back to LLM: \(error.localizedDescription)")
-        } }
-
-        do {
-            _ = try await captionService.translateVTTIncrementally(
-                from: segments,
-                target: target,
-                configuration: configuration
-            ) { partialSegments, partialVTT in
-                try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-                segments = partialSegments
-                try fileStore.writeSegments(partialSegments, to: files.segments)
-                try fileStore.writeVTT(partialVTT, to: files.targetVTT)
-                variant.targetVTTPath = files.targetVTT.fileSystemPath
-                variant.variantStatus = .running
-                variant.errorCode = nil
-                variant.technicalDetails = nil
-                updateSubtitleProgress(variant, segments: partialSegments)
-                applyVariant(variant, to: video)
-                try persistManifest(for: video, target: target, variant: variant, files: files)
-                try context.save()
-                onProgress?(partialSegments)
-            }
-            try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-            guard YTSubtitleCachePolicy.savedTranslationsComplete(
-                segments,
-                expectedSequences: Set(sourceSegments.map(\.sequence))
-            ) else {
-                throw PipelineError.badResponse("Translation response did not cover every frozen subtitle sequence.")
-            }
-            try await persistReadyTranslation(
-                segments,
-                video: video,
-                target: target,
-                variant: variant,
-                files: files,
-                configuration: configuration,
-                context: context,
-                onProgress: onProgress
-            )
-            return segments
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            print("YTLocalService: translation failed for \(video.id): \(error.localizedDescription)")
-            if target == .simplifiedChinese {
-                do {
-                    let youtubeChinese = try await captionService.fetchAutoTranslatedChineseVTT(videoID: video.id)
-                    try Self.checkSubtitleTask(videoID: video.id, generation: taskGeneration)
-                    let alignment = YTVTTParser.alignNativeTranslations(
-                        from: YTVTTParser.parse(youtubeChinese),
-                        to: segments
-                    )
-                    if alignment.isAccepted,
-                       YTSubtitleCachePolicy.savedTranslationsComplete(
-                        alignment.segments,
-                        expectedSequences: Set(sourceSegments.map(\.sequence))
-                       ) {
-                        print(
-                            "YTLocalService: accepting YouTube auto-translation fallback for \(video.id), "
-                                + "score=\(String(format: "%.2f", alignment.score))"
-                        )
-                        segments = alignment.segments
-                        try await persistReadyTranslation(
-                            segments,
-                            video: video,
-                            target: target,
-                            variant: variant,
-                            files: files,
-                            configuration: configuration,
-                            context: context,
-                            onProgress: onProgress
-                        )
-                        return segments
-                    }
-                    print(
-                        "YTLocalService: rejecting YouTube auto-translation fallback for \(video.id), "
-                            + "score=\(String(format: "%.2f", alignment.score))"
-                    )
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    print(
-                        "YTLocalService: YouTube auto-translation fallback failed for \(video.id): "
-                            + error.localizedDescription
-                    )
-                }
-            }
-            variant.variantStatus = (variant.translatedCount ?? 0) > 0 ? .partial : .failed
-            variant.targetVTTPath = FileManager.default.fileExists(atPath: files.targetVTT.fileSystemPath)
-                ? files.targetVTT.fileSystemPath
-                : nil
-            variant.errorCode = "translation_failed"
-            variant.technicalDetails = error.localizedDescription
-            applyVariant(variant, to: video)
-            try? persistManifest(for: video, target: target, variant: variant, files: files)
-            try? context.save()
-            return segments
-        }
-    }
-
-    @MainActor
-    private func persistReadyTranslation(
-        _ segments: [LearningSegment],
-        video: YTVideoRecord,
-        target: TranslationTarget,
-        variant: TranslationVariantRecord,
-        files: TranslationVariantFiles,
-        configuration: AppConfiguration,
-        context: ModelContext,
-        onProgress: (@MainActor ([LearningSegment]) -> Void)?
-    ) async throws {
-        guard YTSubtitleCachePolicy.savedTranslationsComplete(
-            segments,
-            expectedCueCount: segments.count
-        ) else {
-            throw PipelineError.badResponse("Cannot publish incomplete subtitle translations.")
-        }
-        let sourceQuality = YTCaptionSegmentationQualityPolicy.report(
-            for: sourceSegments(from: segments),
-            outlierTolerancePercent: configuration.captionQualityOutlierTolerancePercent
-        )
-        guard sourceQuality.isAcceptable else {
-            print(
-                "YTLocalService: refusing to publish ready translation for \(video.id), "
-                    + "tolerance=\(String(format: "%g", configuration.captionQualityOutlierTolerancePercent))%, "
-                    + "reasons=\(sourceQuality.rejectionReasons.joined(separator: ","))"
-            )
-            throw PipelineError.badResponse("Cannot publish a fragmented or overlapping subtitle timeline.")
-        }
-        try fileStore.writeSegments(segments, to: files.segments)
-        try fileStore.writeVTT(
-            YTVTTParser.makeVTT(from: YTVTTParser.translatedCues(from: segments)),
-            to: files.targetVTT
-        )
-        variant.targetVTTPath = files.targetVTT.fileSystemPath
-        variant.variantStatus = .ready
-        variant.errorCode = nil
-        variant.technicalDetails = nil
-        updateSubtitleProgress(variant, segments: segments)
-        applyVariant(variant, to: video)
-        try persistManifest(for: video, target: target, variant: variant, files: files)
-        try context.save()
-        try? await subtitleSync.publishReady(
-            identity: .youtube(videoID: video.id, target: target),
-            segments: segments,
-            generatedAt: variant.updatedAt
-        )
-        onProgress?(segments)
     }
 
     @MainActor
@@ -1737,14 +1019,6 @@ final class YTLocalService {
             return savedSegments
         }
         return nil
-    }
-
-    private func resumableSegments(
-        from source: [LearningSegment],
-        saved: [LearningSegment]?
-    ) -> [LearningSegment] {
-        guard let saved, !saved.isEmpty else { return source }
-        return TranslationResultMerger.mergeSavedTranslations(saved: saved, onto: source)
     }
 
     private func baseSourceSegments(videoID: String) -> [LearningSegment]? {
@@ -1982,41 +1256,6 @@ final class YTLocalService {
         return try context.fetchCount(descriptor)
     }
 }
-
-#if os(iOS)
-@MainActor
-private final class YTAudioDownloadProgressReporter: @unchecked Sendable {
-    private let onProgress: @MainActor (Int64, Int64, Double?) -> Void
-    private var previousBytes: Int64 = 0
-    private var previousDate = Date()
-    private var smoothedBytesPerSecond: Double?
-
-    init(onProgress: @escaping @MainActor (Int64, Int64, Double?) -> Void) {
-        self.onProgress = onProgress
-    }
-
-    func update(completedBytes: Int64, expectedBytes: Int64) {
-        let now = Date()
-        let elapsed = now.timeIntervalSince(previousDate)
-        let bytesDelta = completedBytes - previousBytes
-
-        if elapsed >= 0.2,
-           let sample = DownloadProgressMetrics.bytesPerSecond(
-               bytesDelta: bytesDelta,
-               elapsedSeconds: elapsed
-           ) {
-            smoothedBytesPerSecond = DownloadProgressMetrics.smoothedBytesPerSecond(
-                previous: smoothedBytesPerSecond,
-                sample: sample
-            )
-            previousBytes = completedBytes
-            previousDate = now
-        }
-
-        onProgress(completedBytes, expectedBytes, smoothedBytesPerSecond)
-    }
-}
-#endif
 
 private struct YouTubeDataAPIResolvedChannel {
     var channel: YouTubeDataAPIChannel

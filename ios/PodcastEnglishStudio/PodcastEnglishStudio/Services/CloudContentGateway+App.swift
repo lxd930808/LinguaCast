@@ -17,6 +17,13 @@ enum CloudContentGatewayFactory {
     /// Artifact fetch for assistant playback: needs URL + token, not the
     /// local "cloud generation" toggle. The V10 job already exists server-side.
     static func makeClientIfCredentialsPresent(configuration: AppConfiguration) -> CloudContentJobClient? {
+        // V18: a signed-in account supplies both the server address and its credential.
+        if let access = AccountServiceAccess.snapshot, let tokenProvider = AccountServiceAccess.tokenProvider {
+            return try? CloudContentJobClient.makeDefault(
+                baseURLString: access.contentBaseURL,
+                tokenProvider: tokenProvider
+            )
+        }
         let token = configuration.contentServiceToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty, URL(string: configuration.normalizedContentServiceBaseURL) != nil else {
             return nil

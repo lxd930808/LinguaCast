@@ -232,22 +232,12 @@ public final class SettingsStore {
             }
             configuration.youtubeAPIKey = storedValues[.youtubeAPIKey] ?? ""
             configuration.dashscopeAPIKey = storedValues[.dashscopeAPIKey] ?? ""
-            configuration.translationProvider = TranslationProviderPolicy.normalizedProvider(
-                storedValues[.translationProvider, default: ""].ifEmpty("dashscope")
-            )
+            // Legacy translation provider values pass through unchanged (no feature reads them).
+            configuration.translationProvider = storedValues[.translationProvider] ?? ""
             configuration.translationAPIKey = storedValues[.translationAPIKey] ?? ""
-            configuration.translationBaseURL = TranslationProviderPolicy.requestBaseURL(
-                provider: configuration.translationProvider,
-                configuredBaseURL: storedValues[.translationBaseURL] ?? ""
-            )
-            configuration.translationModelID = TranslationChatRequestPolicy.normalizedModelID(
-                storedValues[.translationModelID] ?? "",
-                provider: configuration.translationProvider
-            )
-            configuration.translationReasoningEffort = TranslationChatRequestPolicy.normalizedReasoningEffort(
-                storedValues[.translationReasoningEffort] ?? "",
-                provider: configuration.translationProvider
-            )
+            configuration.translationBaseURL = storedValues[.translationBaseURL] ?? ""
+            configuration.translationModelID = storedValues[.translationModelID] ?? ""
+            configuration.translationReasoningEffort = storedValues[.translationReasoningEffort] ?? ""
             configuration.ossAccessKeyID = storedValues[.ossAccessKeyID] ?? ""
             configuration.ossAccessKeySecret = storedValues[.ossAccessKeySecret] ?? ""
             configuration.ossEndpoint = storedValues[.ossEndpoint] ?? ""
@@ -264,9 +254,6 @@ public final class SettingsStore {
             configuration.subtitleDisplayMode = AppConfiguration.subtitleDisplayMode(
                 from: storedValues[.subtitleDisplayMode] ?? ""
             )
-            configuration.contentFilterEnabled = Self.bool(from: storedValues[.contentFilterEnabled] ?? "")
-            configuration.contentFilterKeywords = storedValues[.contentFilterKeywords] ?? ""
-            configuration.contentFilterPrompt = storedValues[.contentFilterPrompt] ?? ""
             // Keep-awake defaults to on; only an explicit stored "false" disables it.
             configuration.keepScreenAwake = storedValues[.keepScreenAwake].map { Self.bool(from: $0) } ?? true
             configuration.captionQualityOutlierTolerancePercent =
@@ -298,9 +285,7 @@ public final class SettingsStore {
             configuration.assistantServiceEnabled = Self.bool(from: storedValues[.assistantServiceEnabled] ?? "")
             configuration.assistantServiceBaseURL = storedValues[.assistantServiceBaseURL] ?? ""
             configuration.assistantServiceToken = storedValues[.assistantServiceToken] ?? ""
-            configuration.generationBackend = GenerationBackend.normalized(
-                storedValues[.generationBackend] ?? ""
-            ).rawValue
+            configuration.generationBackend = storedValues[.generationBackend] ?? ""
 
             try applySubtitlePresentationMigrationIfNeeded(
                 storedValues: storedValues,
@@ -324,16 +309,6 @@ public final class SettingsStore {
     @discardableResult
     public func save() -> Set<AppConfigurationKey> {
         do {
-            let provider = TranslationProviderPolicy.normalizedProvider(configuration.translationProvider)
-            configuration.translationProvider = provider
-            configuration.translationModelID = TranslationChatRequestPolicy.normalizedModelID(
-                configuration.translationModelID,
-                provider: provider
-            )
-            configuration.translationReasoningEffort = TranslationChatRequestPolicy.normalizedReasoningEffort(
-                configuration.translationReasoningEffort,
-                provider: provider
-            )
             configuration.subtitlePresentation = configuration.subtitlePresentation
             configuration.subtitleDisplayMode = AppConfiguration.subtitleDisplayMode(
                 from: configuration.subtitleDisplayMode
@@ -342,12 +317,9 @@ public final class SettingsStore {
                 configuration.iosYouTubePlaybackMode
             ).rawValue
 
-            var changed = Set(AppConfigurationKey.allCases.filter {
+            let changed = Set(AppConfigurationKey.allCases.filter {
                 configuration[$0] != committedConfiguration[$0]
             })
-            if changed.contains(.translationProvider) {
-                changed.formUnion(AppConfigurationKey.translationGroup)
-            }
             guard !changed.isEmpty else {
                 lastError = nil
                 return []
@@ -392,21 +364,6 @@ public final class SettingsStore {
             if values[.translationTargetLanguage] != nil {
                 translationTargetIsProvisional = false
             }
-            configuration.translationProvider = TranslationProviderPolicy.normalizedProvider(
-                configuration.translationProvider
-            )
-            configuration.translationBaseURL = TranslationProviderPolicy.requestBaseURL(
-                provider: configuration.translationProvider,
-                configuredBaseURL: configuration.translationBaseURL
-            )
-            configuration.translationModelID = TranslationChatRequestPolicy.normalizedModelID(
-                configuration.translationModelID,
-                provider: configuration.translationProvider
-            )
-            configuration.translationReasoningEffort = TranslationChatRequestPolicy.normalizedReasoningEffort(
-                configuration.translationReasoningEffort,
-                provider: configuration.translationProvider
-            )
             // Refresh committed non-dirty fields that may have been normalized above.
             for key in AppConfigurationKey.allCases where !dirtyKeys.contains(key) {
                 committedConfiguration[key] = configuration[key]
